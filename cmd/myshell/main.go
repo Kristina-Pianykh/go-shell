@@ -13,11 +13,16 @@ var _ = fmt.Fprint
 type Buffer []byte
 
 type Cmd struct {
-	buffer         *Buffer
-	prompt         string
-	validInput     bool
-	needMatchingCh bool
+	buffer             *Buffer
+	prompt             string
+	validInput         bool
+	needMatchingCh     bool
+	recognizedCommands []string
 }
+
+const EXIT = "exit"
+const ECHO = "echo"
+const TYPE = "type"
 
 func (cmd *Cmd) getBufAsString() string {
 	return string(*cmd.buffer)
@@ -65,10 +70,11 @@ func main() {
 
 	var buffer Buffer = make([]byte, 0, 100)
 	cmd := &Cmd{
-		prompt:         "$ ",
-		validInput:     true,
-		needMatchingCh: false,
-		buffer:         &buffer,
+		prompt:             "$ ",
+		validInput:         true,
+		needMatchingCh:     false,
+		buffer:             &buffer,
+		recognizedCommands: []string{EXIT, ECHO, TYPE},
 	}
 
 	// Wait for user input
@@ -80,12 +86,23 @@ func main() {
 			panic(err)
 		}
 
-		for _, ch := range input {
+		for i, ch := range input {
+			if len(*cmd.buffer) == 0 && i == ' ' {
+				continue
+			}
 			cmd.Push(byte(ch))
 		}
 
+		command, ok := cmd.extractCommand(cmd.getBufAsString())
+
+		if !ok {
+			fmt.Fprintf(os.Stdout, undefined(cmd.getBufAsString()))
+			cmd.Reset()
+			continue
+		}
+
 		switch {
-		case strings.HasPrefix(trim(cmd.getBufAsString()), "exit"):
+		case command == EXIT:
 			argsv := strings.Split(trim(cmd.getBufAsString()), " ")
 			if len(argsv) != 2 {
 				fmt.Fprintf(os.Stdout, undefined(trim(cmd.getBufAsString())))
@@ -96,9 +113,8 @@ func main() {
 				panic(err)
 			}
 			os.Exit(v)
-		case strings.HasPrefix(trim(cmd.getBufAsString()), "echo"):
+		case command == ECHO:
 			cmd.needMatchingCh = true
-			// fmt.Printf("Cmd : %s\n", cmd.String())
 
 			if cmd.validInput {
 				fmt.Fprintf(os.Stdout, fmt.Sprintf("%s\n", parseEcho(cmd.getBufAsString())))
@@ -106,11 +122,30 @@ func main() {
 				continue
 			}
 			cmd.Reset()
-		default:
-			fmt.Fprintf(os.Stdout, undefined(cmd.getBufAsString()))
+		case command == TYPE:
+			tokens := strings.Split(removeNewLineIfPresent(trim(cmd.getBufAsString())), " ")
+			for _, tok := range tokens[1:] {
+				commandArg, ok := cmd.extractCommand(trim(tok))
+				if ok {
+					fmt.Fprintf(os.Stdin, fmt.Sprintf("%s is a shell builtin\n", commandArg))
+				} else {
+					fmt.Fprintf(os.Stdout, undefined(commandArg))
+				}
+			}
 			cmd.Reset()
+		default:
+			break
 		}
 	}
+}
+
+func (cmd *Cmd) extractCommand(str string) (string, bool) {
+	for _, c := range cmd.recognizedCommands {
+		if strings.HasPrefix(str, c) {
+			return c, true
+		}
+	}
+	return str, false
 }
 
 func trim(v string) string {
@@ -119,11 +154,10 @@ func trim(v string) string {
 
 func undefined(input string) string {
 	input = removeNewLineIfPresent(input)
-	return fmt.Sprintf("%s: command not found\n", input)
+	return fmt.Sprintf("%s: not found\n", input)
 }
 
 func parseEcho(buf string) string {
-	// fmt.Printf("before printing echo commang buf: %s\n", buf)
 	var sb strings.Builder
 	doubleQuotesOk := true
 	singleQuotesOk := true
@@ -132,29 +166,11 @@ func parseEcho(buf string) string {
 	for _, ch := range removeNewLineIfPresent(str) {
 		if ch == '"' && singleQuotesOk {
 			continue
-			// } else if ch == '"' && !singleQuotesOk {
-			// 	sb.WriteRune(ch)
 		} else if ch == '\'' && doubleQuotesOk {
 			continue
-			// } else if ch == '\'' && !doubleQuotesOk {
-			// 	sb.WriteRune(ch)
 		}
 		sb.WriteRune(ch)
 	}
-
-	// for i, p := range params {
-	// 	c := strings.TrimSuffix(strings.TrimPrefix(p, " "), " ")
-	// 	quoted := (strings.HasPrefix(c, "\"") && strings.HasSuffix(c, "\"")) ||
-	// 		(strings.HasPrefix(c, "'") && strings.HasSuffix(c, "'"))
-	// 	sb.WriteString(strings.Repeat(" ", i))
-	//
-	// 	if quoted {
-	// 		sb.WriteString(string(c[1 : len(c)-1]))
-	// 	} else {
-	// 		sb.WriteString(c)
-	// 	}
-	//
-	// }
 	return sb.String()
 }
 
