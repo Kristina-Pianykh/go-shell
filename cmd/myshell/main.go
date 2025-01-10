@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -67,7 +68,6 @@ func (cmd *Cmd) String() string {
 }
 
 func main() {
-
 	var buffer Buffer = make([]byte, 0, 100)
 	cmd := &Cmd{
 		prompt:             "$ ",
@@ -93,7 +93,7 @@ func main() {
 			cmd.Push(byte(ch))
 		}
 
-		command, ok := cmd.extractCommand(cmd.getBufAsString())
+		command, ok := cmd.isBuiltin(cmd.getBufAsString())
 
 		if !ok {
 			fmt.Fprintf(os.Stdout, undefined(cmd.getBufAsString()))
@@ -110,7 +110,9 @@ func main() {
 			}
 			v, err := strconv.Atoi(removeNewLineIfPresent(argsv[1]))
 			if err != nil {
-				panic(err)
+				fmt.Fprintf(os.Stdout, undefined(trim(cmd.getBufAsString())))
+				cmd.Reset()
+				continue
 			}
 			os.Exit(v)
 		case command == ECHO:
@@ -124,14 +126,21 @@ func main() {
 			cmd.Reset()
 		case command == TYPE:
 			tokens := strings.Split(removeNewLineIfPresent(trim(cmd.getBufAsString())), " ")
+
 			for _, tok := range tokens[1:] {
-				commandArg, ok := cmd.extractCommand(trim(tok))
-				if ok {
+				commandArg := trim(tok)
+				if _, ok := cmd.isBuiltin(commandArg); ok {
 					fmt.Fprintf(os.Stdin, fmt.Sprintf("%s is a shell builtin\n", commandArg))
+					continue // this is different from bash for shell builtins
+				}
+				path, exists := isInPath(commandArg)
+				if exists {
+					fmt.Fprintf(os.Stdin, fmt.Sprintf("%s is %s\n", commandArg, path))
 				} else {
 					fmt.Fprintf(os.Stdout, undefined(commandArg))
 				}
 			}
+
 			cmd.Reset()
 		default:
 			break
@@ -139,13 +148,42 @@ func main() {
 	}
 }
 
-func (cmd *Cmd) extractCommand(str string) (string, bool) {
+func (cmd *Cmd) isBuiltin(str string) (string, bool) {
 	for _, c := range cmd.recognizedCommands {
 		if strings.HasPrefix(str, c) {
 			return c, true
 		}
 	}
 	return str, false
+}
+
+func isInPath(s string) (string, bool) {
+	paths, exists := os.LookupEnv("PATH")
+	if !exists {
+		return "", false
+	}
+	for _, path := range strings.Split(paths, ":") {
+		path = trim(path)
+		absPath, err := filepath.Abs(path)
+		info, err := os.Stat(absPath)
+		if err != nil {
+			// no such file or directory; ignore faulty paths
+			continue
+		}
+		if !info.Mode().IsDir() {
+			return "", false
+		}
+		dirEntries, err := os.ReadDir(absPath)
+		if err != nil {
+			panic(err)
+		}
+		for _, entry := range dirEntries {
+			if entry.Name() == s {
+				return filepath.Join(absPath, s), true
+			}
+		}
+	}
+	return "", false
 }
 
 func trim(v string) string {

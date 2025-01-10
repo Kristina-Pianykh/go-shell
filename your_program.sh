@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 #
 # Use this script to run your program LOCALLY.
 #
@@ -6,7 +6,7 @@
 #
 # Learn more: https://codecrafters.io/program-interface
 
-set -e # Exit early if any commands fail
+# set -e # Exit early if any commands fail
 
 # Copied from .codecrafters/compile.sh
 #
