@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -217,6 +218,34 @@ func removeNewLineIfPresent(s string) string {
 		return string(s[:len(s)-1])
 	}
 	return s
+}
+
+func (cmd *Cmd) exit() {
+	if len(*cmd.argv) != 2 {
+		fmt.Fprintf(os.Stdout, notFound(cmd.inputAsString()))
+		return
+	}
+	v, err := strconv.Atoi((*cmd.argv)[1])
+	if err != nil {
+		fmt.Fprintf(os.Stdout, notFound(cmd.inputAsString()))
+		return
+	}
+	os.Exit(v)
+}
+
+func (cmd *Cmd) typeCommand() {
+	for _, arg := range (*cmd.argv)[1:] {
+		if arg, ok := cmd.isBuiltin(arg); ok {
+			fmt.Fprintf(os.Stdin, fmt.Sprintf("%s is a shell builtin\n", arg))
+			continue // this is different from bash for shell builtins
+		}
+
+		if path, err := exec.LookPath(arg); err == nil {
+			fmt.Fprintf(os.Stdin, "%s is %s\n", arg, path)
+		} else {
+			fmt.Fprintf(os.Stdout, notFound(arg))
+		}
+	}
 }
 
 func (cmd *Cmd) pwd() {

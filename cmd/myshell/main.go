@@ -4,8 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"os/exec"
-	"strconv"
 )
 
 func main() {
@@ -25,31 +23,11 @@ func main() {
 		case cmd.command == nil:
 			fmt.Fprintf(os.Stdout, notFound((*cmd.argv)[0]))
 		case *cmd.command == EXIT:
-			if len(*cmd.argv) != 2 {
-				fmt.Fprintf(os.Stdout, notFound(cmd.inputAsString()))
-				break
-			}
-			v, err := strconv.Atoi((*cmd.argv)[1])
-			if err != nil {
-				fmt.Fprintf(os.Stdout, notFound(cmd.inputAsString()))
-				break
-			}
-			os.Exit(v)
+			cmd.exit()
 		case *cmd.command == ECHO:
 			fmt.Fprintf(os.Stdout, parseEcho(cmd.getBufAsString()))
 		case *cmd.command == TYPE:
-			for _, arg := range (*cmd.argv)[1:] {
-				if arg, ok := cmd.isBuiltin(arg); ok {
-					fmt.Fprintf(os.Stdin, fmt.Sprintf("%s is a shell builtin\n", arg))
-					continue // this is different from bash for shell builtins
-				}
-
-				if path, err := exec.LookPath(arg); err == nil {
-					fmt.Fprintf(os.Stdin, "%s is %s\n", arg, path)
-				} else {
-					fmt.Fprintf(os.Stdout, notFound(arg))
-				}
-			}
+			cmd.typeCommand()
 		case *cmd.command == PWD:
 			cmd.pwd()
 		case cmd.command != nil && cmd.commandPath != nil:
