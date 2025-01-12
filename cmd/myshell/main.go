@@ -30,6 +30,8 @@ func main() {
 			cmd.typeCommand()
 		case *cmd.command == PWD:
 			cmd.pwd()
+		case *cmd.command == CD:
+			cmd.cd()
 		case cmd.command != nil && cmd.commandPath != nil:
 			cmd.exec()
 		}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -16,7 +17,7 @@ type Cmd struct {
 	validInput     bool
 	needMatchingCh bool
 	argv           *[]string
-	builtins       [4]string
+	builtins       [5]string
 	builtin        bool
 	command        *string
 	commandPath    *string
@@ -26,6 +27,7 @@ const EXIT = "exit"
 const ECHO = "echo"
 const TYPE = "type"
 const PWD = "pwd"
+const CD = "cd"
 
 func cmdInit() *Cmd {
 	var buffer Buffer = make([]byte, 0, 100)
@@ -35,7 +37,7 @@ func cmdInit() *Cmd {
 		validInput:     true,
 		needMatchingCh: false,
 		buffer:         &buffer,
-		builtins:       [4]string{EXIT, ECHO, TYPE, PWD},
+		builtins:       [5]string{EXIT, ECHO, TYPE, PWD, CD},
 		argv:           &argv,
 		command:        nil,
 		commandPath:    nil,
@@ -251,7 +253,26 @@ func (cmd *Cmd) typeCommand() {
 func (cmd *Cmd) pwd() {
 	if path, err := os.Getwd(); err == nil {
 		fmt.Fprintf(os.Stdout, "%s\n", path)
-	} else {
-		fmt.Fprintln(os.Stderr, "Failed to get working directory")
+	}
+}
+
+func (cmd *Cmd) cd() {
+	path := (*cmd.argv)[1]
+
+	// FIXME: this is tmp. will check for relative paths later
+	if !filepath.IsAbs(path) {
+		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", path)
+		return
+	}
+
+	if err := os.Chdir((*cmd.argv)[1]); err != nil {
+		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", path)
+		return
+	}
+
+	// not sure we need to do this
+	err := os.Setenv("PWD", path)
+	if err != nil {
+		panic(err)
 	}
 }
