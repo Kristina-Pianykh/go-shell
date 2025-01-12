@@ -15,15 +15,32 @@ type Cmd struct {
 	validInput     bool
 	needMatchingCh bool
 	argv           *[]string
-	builtins       [3]string
+	builtins       [4]string
 	builtin        bool
-	command        string
-	commandPath    string
+	command        *string
+	commandPath    *string
 }
 
 const EXIT = "exit"
 const ECHO = "echo"
 const TYPE = "type"
+const PWD = "pwd"
+
+func cmdInit() *Cmd {
+	var buffer Buffer = make([]byte, 0, 100)
+	argv := []string{}
+	cmd := &Cmd{
+		prompt:         "$ ",
+		validInput:     true,
+		needMatchingCh: false,
+		buffer:         &buffer,
+		builtins:       [4]string{EXIT, ECHO, TYPE, PWD},
+		argv:           &argv,
+		command:        nil,
+		commandPath:    nil,
+	}
+	return cmd
+}
 
 func (cmd *Cmd) parse(input string) {
 	// echo parsing is a special case
@@ -78,13 +95,13 @@ func (cmd *Cmd) parse(input string) {
 
 	if ok {
 		cmd.builtin = true
-		cmd.command = command
+		cmd.command = &command
 		return
 	}
 
 	if path, err := exec.LookPath((*cmd.argv)[0]); err == nil {
-		cmd.commandPath = path
-		cmd.command = (*cmd.argv)[0]
+		cmd.commandPath = &path
+		cmd.command = &(*cmd.argv)[0]
 	}
 
 	return
@@ -92,7 +109,7 @@ func (cmd *Cmd) parse(input string) {
 
 func (cmd *Cmd) exec() {
 	// codecraters test expect cmd.command instead of cmd.commandPath to pass
-	cmdC := exec.Command(cmd.command, (*cmd.argv)[1:]...)
+	cmdC := exec.Command(*cmd.command, (*cmd.argv)[1:]...)
 	var out strings.Builder
 	cmdC.Stdout = &out
 	if err := cmdC.Run(); err != nil {
@@ -145,8 +162,8 @@ func (cmd *Cmd) Empty() {
 func (cmd *Cmd) Reset() {
 	cmd.Empty()
 	*cmd.argv = (*cmd.argv)[:0]
-	cmd.command = ""
-	cmd.commandPath = ""
+	cmd.command = nil
+	cmd.commandPath = nil
 	cmd.validInput = true
 	cmd.needMatchingCh = false
 	cmd.prompt = "$ "
@@ -200,4 +217,12 @@ func removeNewLineIfPresent(s string) string {
 		return string(s[:len(s)-1])
 	}
 	return s
+}
+
+func (cmd *Cmd) pwd() {
+	if path, err := os.Getwd(); err == nil {
+		fmt.Fprintf(os.Stdout, "%s\n", path)
+	} else {
+		fmt.Fprintln(os.Stderr, "Failed to get working directory")
+	}
 }

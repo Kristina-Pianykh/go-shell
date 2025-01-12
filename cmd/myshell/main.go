@@ -9,18 +9,7 @@ import (
 )
 
 func main() {
-	var buffer Buffer = make([]byte, 0, 100)
-	argv := []string{}
-	cmd := &Cmd{
-		prompt:         "$ ",
-		validInput:     true,
-		needMatchingCh: false,
-		buffer:         &buffer,
-		builtins:       [3]string{EXIT, ECHO, TYPE},
-		argv:           &argv,
-		command:        "",
-		commandPath:    "",
-	}
+	cmd := cmdInit()
 
 	// Wait for user input
 	for {
@@ -33,7 +22,9 @@ func main() {
 		cmd.parse(input)
 
 		switch {
-		case cmd.command == EXIT:
+		case cmd.command == nil:
+			fmt.Fprintf(os.Stdout, notFound((*cmd.argv)[0]))
+		case *cmd.command == EXIT:
 			if len(*cmd.argv) != 2 {
 				fmt.Fprintf(os.Stdout, notFound(cmd.inputAsString()))
 				break
@@ -44,9 +35,9 @@ func main() {
 				break
 			}
 			os.Exit(v)
-		case cmd.command == ECHO:
+		case *cmd.command == ECHO:
 			fmt.Fprintf(os.Stdout, parseEcho(cmd.getBufAsString()))
-		case cmd.command == TYPE:
+		case *cmd.command == TYPE:
 			for _, arg := range (*cmd.argv)[1:] {
 				if arg, ok := cmd.isBuiltin(arg); ok {
 					fmt.Fprintf(os.Stdin, fmt.Sprintf("%s is a shell builtin\n", arg))
@@ -59,10 +50,10 @@ func main() {
 					fmt.Fprintf(os.Stdout, notFound(arg))
 				}
 			}
-		case len(cmd.commandPath) > 0:
+		case *cmd.command == PWD:
+			cmd.pwd()
+		case cmd.command != nil && cmd.commandPath != nil:
 			cmd.exec()
-		default:
-			fmt.Fprintf(os.Stdout, notFound((*cmd.argv)[0]))
 		}
 		cmd.Reset()
 	}
