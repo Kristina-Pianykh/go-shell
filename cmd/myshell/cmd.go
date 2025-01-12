@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -257,21 +258,34 @@ func (cmd *Cmd) pwd() {
 }
 
 func (cmd *Cmd) cd() {
+	var absPath string
+	// var joinedPath string
 	path := (*cmd.argv)[1]
 
-	// FIXME: this is tmp. will check for relative paths later
-	if !filepath.IsAbs(path) {
-		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", path)
+	if invalidPath, err := regexp.Match(".*[\\.]{3,}.*", []byte(path)); err == nil && invalidPath {
+		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
 		return
 	}
 
-	if err := os.Chdir((*cmd.argv)[1]); err != nil {
-		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", path)
+	if filepath.IsAbs(path) {
+		absPath = path
+	} else {
+		// FIXME: handle symlinks
+
+		cwd, err := os.Getwd()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "Failed to print current working directory")
+		}
+		absPath = filepath.Join(cwd, path)
+	}
+
+	if err := os.Chdir(absPath); err != nil {
+		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
 		return
 	}
 
 	// not sure we need to do this
-	err := os.Setenv("PWD", path)
+	err := os.Setenv("PWD", absPath)
 	if err != nil {
 		panic(err)
 	}
