@@ -259,12 +259,20 @@ func (cmd *Cmd) pwd() {
 
 func (cmd *Cmd) cd() {
 	var absPath string
-	// var joinedPath string
 	path := (*cmd.argv)[1]
 
 	if invalidPath, err := regexp.Match(".*[\\.]{3,}.*", []byte(path)); err == nil && invalidPath {
 		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
 		return
+	}
+
+	if strings.HasPrefix(path, "~") {
+		home := os.Getenv("HOME")
+		if len(path) == 0 {
+			fmt.Fprintf(os.Stderr, "Failed to access HOME environment variable\n")
+			return
+		}
+		path = filepath.Join(home, path[1:])
 	}
 
 	if filepath.IsAbs(path) {
