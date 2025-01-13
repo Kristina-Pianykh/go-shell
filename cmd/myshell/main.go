@@ -18,6 +18,10 @@ func main() {
 			panic(err)
 		}
 		cmd.parse(input)
+		if cmd.needMatchingCh && !cmd.validInput {
+			// fmt.Printf("incomplete input; continue\n")
+			continue
+		}
 
 		switch {
 		case cmd.command == nil:
@@ -25,7 +29,12 @@ func main() {
 		case *cmd.command == EXIT:
 			cmd.exit()
 		case *cmd.command == ECHO:
-			fmt.Fprintf(os.Stdout, parseEcho(cmd.getBufAsString()))
+			s, err := cmd.getEchoArgs()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, err.Error())
+				break
+			}
+			fmt.Fprintf(os.Stdout, s)
 		case *cmd.command == TYPE:
 			cmd.typeCommand()
 		case *cmd.command == PWD:

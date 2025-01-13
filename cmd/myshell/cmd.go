@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,7 +11,45 @@ import (
 	"strings"
 )
 
-type Buffer []byte
+// type Buffer []byte
+type Buffer struct {
+	content *[]byte
+	stack   *stack
+}
+type stack []byte
+
+func (b *Buffer) reset() {
+	*b.content = (*b.content)[:0]
+	b.stack.empty()
+}
+
+func (s *stack) push(v byte) *stack {
+	updatedS := append(*s, v)
+	return &updatedS
+}
+
+func (s *stack) pop() (byte, bool) {
+	l := len(*s)
+	// fmt.Printf("pop(): len: %d, stack: %s\n", l, string(*s))
+	if l == 0 {
+		return 0, false
+	}
+	v := (*s)[l-1]
+	*s = (*s)[:l-1]
+	return v, true
+}
+
+func (s *stack) peek() (byte, bool) {
+	l := len(*s)
+	if l == 0 {
+		return 0, false
+	}
+	return (*s)[l-1], true
+}
+
+func (s *stack) empty() {
+	*s = (*s)[:0]
+}
 
 type Cmd struct {
 	buffer         *Buffer
@@ -31,7 +70,13 @@ const PWD = "pwd"
 const CD = "cd"
 
 func cmdInit() *Cmd {
-	var buffer Buffer = make([]byte, 0, 100)
+	var content []byte = make([]byte, 0, 100)
+	var stack stack = []byte{}
+	var buffer Buffer = Buffer{
+		content: &content,
+		stack:   &stack,
+	}
+
 	argv := []string{}
 	cmd := &Cmd{
 		prompt:         "$ ",
@@ -48,25 +93,28 @@ func cmdInit() *Cmd {
 
 func (cmd *Cmd) parse(input string) {
 	// echo parsing is a special case
-	inputCleanedLeft := strings.TrimLeft(input, " \n\t")
+	inputLeftTrimmed := strings.TrimLeft(input, " \n\t")
 
-	// FIXME: echo parsing on incomplete input
-	if strings.HasPrefix(inputCleanedLeft, ECHO) || strings.HasPrefix(cmd.getBufAsString(), ECHO) {
+	if strings.HasPrefix(inputLeftTrimmed, ECHO) {
+		command := "echo"
+		cmd.command = &command
 		cmd.needMatchingCh = true
-
-		if cmd.validInput {
-			*cmd.buffer = append(*cmd.buffer, parseEcho(input)...)
+	}
+	if cmd.command != nil && *cmd.command == ECHO {
+		cmd.appendToBufferMatching(inputLeftTrimmed)
+		if len(*cmd.buffer.stack) > 0 {
+			cmd.validInput = false
 		} else {
-			return
+			cmd.validInput = true
 		}
+		// fmt.Printf("echo command in buffer: %s\n", cmd.getBufAsString())
+		return
 	}
 
 	quoteMatched := true
 	stack := []rune{}
 
-	for _, ch := range input {
-		// fmt.Printf("ch: %c\n", ch)
-		// fmt.Printf("%v\n", *cmd.argv)
+	for _, ch := range inputLeftTrimmed {
 
 		if (ch == ' ' || ch == '\n') && quoteMatched {
 			*cmd.argv = append(*cmd.argv, string(stack))
@@ -81,18 +129,16 @@ func (cmd *Cmd) parse(input string) {
 			continue
 		}
 		stack = append(stack, ch)
-		// fmt.Printf("stack: %s\n", string(stack))
 	}
 
 	// keep input in buffer
 	for _, arg := range *cmd.argv {
-		*cmd.buffer = append(*cmd.buffer, []byte(arg)...)
-		*cmd.buffer = append(*cmd.buffer, ' ')
+		cmd.appendToBuffer(arg)
+		cmd.appendToBuffer(" ")
 	}
 
 	for i, arg := range *cmd.argv {
 		(*cmd.argv)[i] = strings.TrimRight(strings.TrimLeft(arg, " "), " ")
-		// fmt.Printf("arg %d: %s\n", i, (*cmd.argv)[i])
 	}
 
 	command, ok := cmd.isBuiltin((*cmd.argv)[0])
@@ -111,6 +157,61 @@ func (cmd *Cmd) parse(input string) {
 	return
 }
 
+func (cmd *Cmd) appendToBuffer(s string) {
+	*cmd.buffer.content = append(*cmd.buffer.content, s...)
+}
+
+func (cmd *Cmd) appendToBufferMatching(s string) {
+	if len(cmd.getBufAsString()) > 0 {
+		*cmd.buffer.content = []byte(removeNewLineIfPresent(cmd.getBufAsString()))
+	}
+
+	arg := []byte{}
+
+	for _, ch := range s {
+		// fmt.Printf("ch: %c\n", ch)
+		onTop, exists := cmd.buffer.stack.peek()
+		if !exists {
+			switch ch {
+			case '\'', '"':
+				cmd.buffer.stack = cmd.buffer.stack.push(byte(ch))
+				continue
+			case ' ', '\t':
+				if len(arg) == 0 && strings.HasSuffix(cmd.getBufAsString(), " ") {
+					continue
+				}
+				arg = []byte(string(removeMultipleWhitespaces(arg)))
+				*cmd.buffer.content = append(*cmd.buffer.content, arg...)
+				*cmd.buffer.content = append(*cmd.buffer.content, ' ')
+				arg = arg[:0]
+				continue
+			case '\n':
+				*cmd.buffer.content = append(*cmd.buffer.content, arg...)
+				break
+			default:
+				arg = append(arg, byte(ch))
+			}
+		}
+		if exists {
+			if byte(ch) != onTop {
+				arg = append(arg, byte(ch))
+				continue
+			}
+			*cmd.buffer.content = append(*cmd.buffer.content, arg...)
+			arg = arg[:0]
+			cmd.buffer.stack.pop()
+		}
+	}
+}
+
+func removeMultipleWhitespaces(s []byte) []byte {
+	multiSpace, err := regexp.Compile(" {2,}|\t+")
+	if err != nil {
+		panic(err)
+	}
+	return multiSpace.ReplaceAll(s, []byte{' '})
+}
+
 func (cmd *Cmd) exec() {
 	// codecraters test expect cmd.command instead of cmd.commandPath to pass
 	cmdC := exec.Command(*cmd.command, (*cmd.argv)[1:]...)
@@ -125,7 +226,25 @@ func (cmd *Cmd) exec() {
 }
 
 func (cmd *Cmd) getBufAsString() string {
-	return string(*cmd.buffer)
+	return string(*cmd.buffer.content)
+}
+
+func (cmd *Cmd) getEchoArgs() (string, error) {
+	args, found := strings.CutPrefix(cmd.getBufAsString(), "echo")
+	if found {
+		return addNewLineIfAbsent(trim(args)), nil
+	}
+	return "", errors.New(fmt.Sprintf("failed to parse echo args from %s\n", cmd.getBufAsString()))
+}
+
+func addNewLineIfAbsent(s string) string {
+	if strings.HasSuffix(s, "\n") {
+		return s
+	}
+	var sb strings.Builder
+	sb.WriteString(s)
+	sb.WriteString("\n")
+	return sb.String()
 }
 
 func (cmd *Cmd) inputAsString() string {
@@ -136,35 +255,8 @@ func (cmd *Cmd) inputAsString() string {
 	return sb.String()
 }
 
-func (cmd *Cmd) Push(v byte) {
-	if v == '"' {
-		cmd.validInput = !cmd.validInput
-	}
-	if v == '\'' {
-		cmd.validInput = !cmd.validInput
-	}
-	// if !cmd.validInput {
-	// 	cmd.prompt = "> "
-	// } else {
-	// 	cmd.prompt = "$ "
-	// }
-	*cmd.buffer = append(*cmd.buffer, v)
-}
-
-func (cmd *Cmd) Pop() byte {
-	// FIXME: What do we do if the stack is empty, though?
-	l := len(*cmd.buffer)
-	v := (*cmd.buffer)[l-1]
-	*cmd.buffer = (*cmd.buffer)[:l-1]
-	return v
-}
-
-func (cmd *Cmd) Empty() {
-	*cmd.buffer = (*cmd.buffer)[:0]
-}
-
 func (cmd *Cmd) Reset() {
-	cmd.Empty()
+	cmd.buffer.reset()
 	*cmd.argv = (*cmd.argv)[:0]
 	cmd.command = nil
 	cmd.commandPath = nil
@@ -175,7 +267,7 @@ func (cmd *Cmd) Reset() {
 }
 
 func (cmd *Cmd) String() string {
-	return fmt.Sprintf("Cmd{prompt: %s, validInput: %v, needMatchingCh: %v, buffer: %s}", cmd.prompt, cmd.validInput, cmd.needMatchingCh, string(*cmd.buffer))
+	return fmt.Sprintf("Cmd{prompt: %s, validInput: %v, needMatchingCh: %v, buffer: %s}", cmd.prompt, cmd.validInput, cmd.needMatchingCh, cmd.getBufAsString())
 }
 
 func (cmd *Cmd) isBuiltin(str string) (string, bool) {
@@ -188,32 +280,12 @@ func (cmd *Cmd) isBuiltin(str string) (string, bool) {
 }
 
 func trim(v string) string {
-	return strings.TrimSuffix(strings.TrimPrefix(v, " "), " ")
+	return strings.TrimRight(strings.TrimLeft(v, " "), " ")
 }
 
 func notFound(input string) string {
 	input = removeNewLineIfPresent(input)
 	return fmt.Sprintf("%s: not found\n", input)
-}
-
-func parseEcho(buf string) string {
-	var sb strings.Builder
-	doubleQuotesOk := true
-	singleQuotesOk := true
-
-	str := strings.TrimPrefix(strings.Split(buf, "echo")[1], " ")
-	for _, ch := range removeNewLineIfPresent(str) {
-		if ch == '"' && singleQuotesOk {
-			continue
-		} else if ch == '\'' && doubleQuotesOk {
-			continue
-		}
-		sb.WriteRune(ch)
-	}
-	if !strings.HasSuffix(sb.String(), "\n") {
-		sb.WriteString("\n")
-	}
-	return sb.String()
 }
 
 func removeNewLineIfPresent(s string) string {
