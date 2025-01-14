@@ -54,10 +54,26 @@ func (p *Parser) parse(input string) (*[]string, error) {
 	}
 	inputLeftTrimmed := strings.TrimLeft(input, " \n\t")
 
-	arg := []rune{}
+	arg := []byte{}
 
-	for _, ch := range inputLeftTrimmed {
+	i := 0
+	for {
+		if i == len(inputLeftTrimmed) {
+			break
+		}
+		ch := inputLeftTrimmed[i]
 		switch ch {
+		case '\\':
+			if !p.doubleQuoted && !p.singleQuoted {
+				if i+1 < len(inputLeftTrimmed) {
+					arg = append(arg, inputLeftTrimmed[i+1])
+					i = i + 2
+				}
+			} else if p.doubleQuoted || p.singleQuoted {
+				arg = append(arg, ch)
+				i++
+			}
+			continue
 		case '\'':
 
 			if p.doubleQuoted && !p.singleQuoted {
@@ -67,6 +83,7 @@ func (p *Parser) parse(input string) (*[]string, error) {
 			} else if !p.doubleQuoted && !p.singleQuoted {
 				p.singleQuoted = true
 			}
+			i++
 			continue
 
 		case '"':
@@ -78,6 +95,7 @@ func (p *Parser) parse(input string) (*[]string, error) {
 			} else if !p.doubleQuoted && !p.singleQuoted {
 				p.doubleQuoted = true
 			}
+			i++
 			continue
 
 		case ' ', '\t':
@@ -90,6 +108,7 @@ func (p *Parser) parse(input string) (*[]string, error) {
 				}
 				arg = arg[:0]
 			}
+			i++
 			continue
 
 		case '\n':
@@ -111,9 +130,11 @@ func (p *Parser) parse(input string) (*[]string, error) {
 				}
 				arg = arg[:0]
 			}
+			i++
 
 		default:
 			arg = append(arg, ch)
+			i++
 		}
 	}
 

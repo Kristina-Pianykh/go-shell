@@ -102,6 +102,7 @@ func (cmd *Cmd) setCommandAndPath(c *string) {
 }
 
 func (cmd *Cmd) echo() {
+	// fmt.Printf("argv: %v\n", *cmd.argv)
 	var sb strings.Builder
 	for i := 1; i < cmd.argc; i++ {
 		sb.WriteString((*cmd.argv)[i])
