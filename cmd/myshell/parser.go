@@ -64,12 +64,13 @@ func (p *Parser) parse(input string) (*[]string, error) {
 		ch := inputLeftTrimmed[i]
 		switch ch {
 		case '\\':
-			if !p.doubleQuoted && !p.singleQuoted {
-				if i+1 < len(inputLeftTrimmed) {
-					arg = append(arg, inputLeftTrimmed[i+1])
-					i = i + 2
-				}
-			} else if p.doubleQuoted || p.singleQuoted {
+			if !p.doubleQuoted && !p.singleQuoted && i+1 < len(inputLeftTrimmed) {
+				arg = append(arg, inputLeftTrimmed[i+1])
+				i = i + 2
+			} else if p.doubleQuoted && !p.singleQuoted {
+				arg = append(arg, ch)
+				i++
+			} else if !p.doubleQuoted && p.singleQuoted {
 				arg = append(arg, ch)
 				i++
 			}
