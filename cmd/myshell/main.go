@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 )
 
 func main() {
-	cmd := cmdInit()
+	cmd := initCmd()
+	parser := initParser()
 
 	// Wait for user input
 	for {
@@ -17,11 +19,18 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
-		cmd.parse(input)
-		if cmd.needMatchingCh && !cmd.validInput {
-			// fmt.Printf("incomplete input; continue\n")
+		argv, err := parser.parse(input)
+		if err != nil && errors.Is(err, unclosedQuoteErr) {
 			continue
 		}
+
+		if len(*argv) < 1 {
+			goto reset
+		}
+
+		cmd.argv = argv
+		cmd.argc = len(*argv)
+		cmd.setCommandAndPath(&(*argv)[0])
 
 		switch {
 		case cmd.command == nil:
@@ -29,12 +38,7 @@ func main() {
 		case *cmd.command == EXIT:
 			cmd.exit()
 		case *cmd.command == ECHO:
-			s, err := cmd.getEchoArgs()
-			if err != nil {
-				fmt.Fprintf(os.Stderr, err.Error())
-				break
-			}
-			fmt.Fprintf(os.Stdout, s)
+			cmd.echo()
 		case *cmd.command == TYPE:
 			cmd.typeCommand()
 		case *cmd.command == PWD:
@@ -44,6 +48,9 @@ func main() {
 		case cmd.command != nil && cmd.commandPath != nil:
 			cmd.exec()
 		}
+
+	reset:
+		parser.clear()
 		cmd.Reset()
 	}
 }
