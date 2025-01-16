@@ -19,6 +19,7 @@ func main() {
 		if err != nil {
 			panic(err)
 		}
+
 		argv, err := parser.parse(input)
 		if err != nil && errors.Is(err, unclosedQuoteErr) {
 			continue

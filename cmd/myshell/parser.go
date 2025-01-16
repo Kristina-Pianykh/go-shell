@@ -44,8 +44,20 @@ func NewUnclosedQuoteError() error {
 	return &unclosedQuoteError{}
 }
 
+type unexpectedNewLine struct {
+}
+
+func (e *unexpectedNewLine) Error() string {
+	return fmt.Sprintf("Unexpected 'newline'")
+}
+
+func NewUnexpectedNewLineError() error {
+	return &unexpectedNewLine{}
+}
+
 var (
-	unclosedQuoteErr = NewUnclosedQuoteError()
+	unclosedQuoteErr     = NewUnclosedQuoteError()
+	unexpectedNewLineErr = NewUnexpectedNewLineError()
 )
 
 func (p *Parser) parse(input string) (*[]string, error) {
@@ -63,6 +75,53 @@ func (p *Parser) parse(input string) (*[]string, error) {
 		}
 		ch := inputLeftTrimmed[i]
 		switch ch {
+		case '>':
+			// 2454>
+			// 2454>|
+			// >|
+			// >
+
+			if !p.doubleQuoted && !p.singleQuoted {
+				if len(arg) > 0 && isNumber(string(arg)) {
+					*p.argv = append(*p.argv, truncateLeadingZeros(string(arg)))
+					arg = arg[:0]
+				}
+
+				if i+1 < len(inputLeftTrimmed) { // should always be the case cause inputs ends with '\n' but just to be sure
+					var j int // next char after the op '>[|]' or '>>'
+					if inputLeftTrimmed[i+1] == '|' {
+						*p.argv = append(*p.argv, ">|")
+						j = i + 2
+						i = i + 2
+
+						// FIXME: can pipe follow '>>': '>>[|]'?
+					} else if inputLeftTrimmed[i+1] == '>' {
+						*p.argv = append(*p.argv, ">>")
+						j = i + 2
+						i = i + 2
+					} else {
+						*p.argv = append(*p.argv, ">")
+						j = i + 1
+						i++
+					}
+
+					// check that '>[|]' is followed by something and doesn't end with '\n'
+					foundNonWhiteSpaceCh := false
+					for ; j < len(inputLeftTrimmed); j++ {
+						if j != ' ' && j != '\t' && j != '\n' {
+							foundNonWhiteSpaceCh = true
+						}
+					}
+					if !foundNonWhiteSpaceCh {
+						return nil, unexpectedNewLineErr
+					}
+				}
+
+			} else if p.doubleQuoted || p.singleQuoted {
+				arg = append(arg, ch)
+				i++
+			}
+
 		case '\\':
 
 			if !p.doubleQuoted && !p.singleQuoted && i+1 < len(inputLeftTrimmed) {
@@ -145,7 +204,47 @@ func (p *Parser) parse(input string) (*[]string, error) {
 		}
 	}
 
+	fmt.Printf("p.argv: %v\n", *p.argv)
 	return p.argv, nil
+}
+
+func truncateLeadingZeros(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+
+	var sb strings.Builder
+	leadingZeros := true
+
+	for _, ch := range s {
+		if ch == '0' && leadingZeros {
+			continue
+		}
+		sb.WriteRune(ch)
+		leadingZeros = false
+	}
+	return sb.String()
+}
+
+func isNumber(s string) bool {
+	s = trim(s)
+	leadingZero := true
+
+	if len(s) == 0 {
+		return false
+	}
+	for _, ch := range s {
+		// leading zeros are truncated
+		if len(s) > 1 && ch == '0' && leadingZero {
+			continue
+		}
+
+		if !('0' <= ch && ch <= '9') {
+			return false
+		}
+		leadingZero = false
+	}
+	return true
 }
 
 func notFound(input string) string {

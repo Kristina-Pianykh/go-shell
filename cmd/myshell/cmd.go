@@ -6,20 +6,20 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
 
 type Cmd struct {
-	prompt         string
-	validInput     bool
-	needMatchingCh bool
-	argv           *[]string
-	argc           int
-	builtins       *[5]string
-	builtin        bool
-	command        *string
-	commandPath    *string
+	prompt      string
+	tokens      *[]string
+	argv        *[]string
+	argc        int
+	builtins    *[5]string
+	command     *string
+	commandPath *string
+	fds         map[int]*os.File
 }
 
 const EXIT = "exit"
@@ -29,52 +29,84 @@ const PWD = "pwd"
 const CD = "cd"
 
 var builtins [5]string = [5]string{EXIT, ECHO, TYPE, PWD, CD}
+var fds map[int]*os.File = map[int]*os.File{0: os.Stdin, 1: os.Stdout, 2: os.Stderr}
 
 func initCmd() *Cmd {
+	tokens := []string{}
 	argv := []string{}
 	cmd := &Cmd{
-		prompt:         "$ ",
-		validInput:     true,
-		needMatchingCh: false,
-		builtins:       &builtins,
-		argv:           &argv,
-		argc:           0,
-		command:        nil,
-		commandPath:    nil,
+		prompt:      "$ ",
+		builtins:    &builtins,
+		tokens:      &tokens,
+		argv:        &argv,
+		argc:        0,
+		command:     nil,
+		commandPath: nil,
+		fds:         fds,
 	}
 	return cmd
 }
 
 func (cmd *Cmd) exec() {
-	// codecraters test expect cmd.command instead of cmd.commandPath to pass
-	cmdC := exec.Command(*cmd.command, (*cmd.argv)[1:]...)
+	cmdC := exec.Command(*cmd.command, (*cmd.tokens)[1:]...)
 	var out strings.Builder
 	cmdC.Stdout = &out
 	if err := cmdC.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "%s\n", err)
 	} else {
 		// codecraters test expect truncated newline but it's not the right behavior
-		fmt.Fprintf(os.Stdout, "%s\n", removeNewLineIfPresent(out.String()))
+		fmt.Fprintf(cmd.fds[1], "%s\n", removeNewLineIfPresent(out.String()))
+	}
+}
+
+// func (cmd *Cmd) redirectFd(fd int, op string) {
+// 	var err error
+// 	// redirectionOps := []string{">", ">|", ">>"}
+// 	_, path := splitAtRedirectOp(cmd.tokens, op)
+// 	*cmd.tokens[fd], err = os.OpenFile(pat)
+// }
+
+func (cmd *Cmd) parse(argv *[]string, op string) {
+	var path string
+	var err error
+	redirectionOps := []string{">", ">|", ">>"}
+
+	for _, op := range redirectionOps {
+		if slices.Contains(*cmd.tokens, op) {
+
+			for i := 0; i < len(*argv); {
+				arg := (*argv)[i]
+
+				if arg == op {
+					path = (*argv)[i+1]
+					i = i + 2
+					continue
+				}
+				*cmd.argv = append(*cmd.argv, arg)
+				i++
+			}
+
+      if op ==
+			*cmd.fds[1], err = os.OpenFile(path)
+		}
 	}
 }
 
 func (cmd *Cmd) getArgv() string {
 	var sb strings.Builder
-	for _, arg := range *cmd.argv {
+	for _, arg := range *cmd.tokens {
 		sb.WriteString(arg)
 	}
 	return sb.String()
 }
 
 func (cmd *Cmd) Reset() {
-	*cmd.argv = (*cmd.argv)[:0]
+	*cmd.tokens = (*cmd.tokens)[:0]
 	cmd.argc = 0
 	cmd.command = nil
 	cmd.commandPath = nil
-	cmd.validInput = true
-	cmd.needMatchingCh = false
 	cmd.prompt = "$ "
-	// cmd.builtin = false
+	cmd.fds = fds
 }
 
 // func (cmd *Cmd) String() string {
@@ -105,7 +137,7 @@ func (cmd *Cmd) echo() {
 	// fmt.Printf("argv: %v\n", *cmd.argv)
 	var sb strings.Builder
 	for i := 1; i < cmd.argc; i++ {
-		sb.WriteString((*cmd.argv)[i])
+		sb.WriteString((*cmd.tokens)[i])
 		if i < cmd.argc-1 {
 			sb.WriteString(" ")
 		} else {
@@ -116,11 +148,11 @@ func (cmd *Cmd) echo() {
 }
 
 func (cmd *Cmd) exit() {
-	if len(*cmd.argv) != 2 {
+	if len(*cmd.tokens) != 2 {
 		fmt.Fprintf(os.Stdout, notFound(cmd.getArgv()))
 		return
 	}
-	v, err := strconv.Atoi((*cmd.argv)[1])
+	v, err := strconv.Atoi((*cmd.tokens)[1])
 	if err != nil {
 		fmt.Fprintf(os.Stdout, notFound(cmd.getArgv()))
 		return
@@ -129,7 +161,7 @@ func (cmd *Cmd) exit() {
 }
 
 func (cmd *Cmd) typeCommand() {
-	for _, arg := range (*cmd.argv)[1:] {
+	for _, arg := range (*cmd.tokens)[1:] {
 		if ok := cmd.isBuiltin(arg); ok {
 			fmt.Fprintf(os.Stdin, fmt.Sprintf("%s is a shell builtin\n", arg))
 			continue // this is different from bash for shell builtins
@@ -151,7 +183,7 @@ func (cmd *Cmd) pwd() {
 
 func (cmd *Cmd) cd() {
 	var absPath string
-	path := (*cmd.argv)[1]
+	path := (*cmd.tokens)[1]
 
 	if invalidPath, err := regexp.Match(".*[\\.]{3,}.*", []byte(path)); err == nil && invalidPath {
 		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
