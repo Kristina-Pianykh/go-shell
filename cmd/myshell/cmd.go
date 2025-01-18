@@ -108,10 +108,7 @@ func (cmd *Cmd) redirectFd(fd int, filePath, op string) error {
 
 		cmd.fds[fd] = file
 	case ">>":
-		file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_APPEND, 0644)
-		if errors.As(err, &os.ErrNotExist) {
-			return err
-		}
+		file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 		if err != nil {
 			panic(err) // FIXME: any relevant errors?
 		}
