@@ -20,6 +20,6 @@ func TestIsNumber(t *testing.T) {
 }
 
 func TestSplitAt(t *testing.T) {
-	argv, path := splitAt(&[]string{"echo", "hello", ">>", "test.txt"}, ">>")
+	argv, path := splitAtRedirectOp(&[]string{"echo", "hello", ">>", "test.txt"}, ">>")
 	fmt.Printf("%v, %v\n", argv, path)
 }

@@ -9,8 +9,7 @@ import (
 type Parser struct {
 	currentInput *string
 	buffer       *string
-	// argc         int
-	argv         *[]string
+	tokens       *[]string
 	singleQuoted bool
 	doubleQuoted bool
 }
@@ -18,7 +17,7 @@ type Parser struct {
 func (p *Parser) clear() {
 	p.currentInput = nil
 	// p.argc = 0
-	p.argv = nil
+	p.tokens = nil
 	p.singleQuoted = false
 	p.doubleQuoted = false
 }
@@ -27,14 +26,13 @@ func initParser() *Parser {
 	return &Parser{
 		currentInput: nil,
 		// argc:         0,
-		argv:         nil,
+		tokens:       nil,
 		singleQuoted: false,
 		doubleQuoted: false,
 	}
 }
 
-type unclosedQuoteError struct {
-}
+type unclosedQuoteError struct{}
 
 func (e *unclosedQuoteError) Error() string {
 	return fmt.Sprintf("Unclosed quote")
@@ -61,8 +59,8 @@ var (
 )
 
 func (p *Parser) parse(input string) (*[]string, error) {
-	if p.argv == nil {
-		p.argv = &[]string{}
+	if p.tokens == nil {
+		p.tokens = &[]string{}
 	}
 	inputLeftTrimmed := strings.TrimLeft(input, " \n\t")
 
@@ -83,24 +81,27 @@ func (p *Parser) parse(input string) (*[]string, error) {
 
 			if !p.doubleQuoted && !p.singleQuoted {
 				if len(arg) > 0 && isNumber(string(arg)) {
-					*p.argv = append(*p.argv, truncateLeadingZeros(string(arg)))
+					*p.tokens = append(*p.tokens, truncateLeadingZeros(string(arg)))
 					arg = arg[:0]
 				}
 
 				if i+1 < len(inputLeftTrimmed) { // should always be the case cause inputs ends with '\n' but just to be sure
+
+					// FIXME: handle invalid syntax errors like '>>>' or '>>!' (what to do in last case?)
+
 					var j int // next char after the op '>[|]' or '>>'
 					if inputLeftTrimmed[i+1] == '|' {
-						*p.argv = append(*p.argv, ">|")
+						*p.tokens = append(*p.tokens, ">|")
 						j = i + 2
 						i = i + 2
 
 						// FIXME: can pipe follow '>>': '>>[|]'?
 					} else if inputLeftTrimmed[i+1] == '>' {
-						*p.argv = append(*p.argv, ">>")
+						*p.tokens = append(*p.tokens, ">>")
 						j = i + 2
 						i = i + 2
 					} else {
-						*p.argv = append(*p.argv, ">")
+						*p.tokens = append(*p.tokens, ">")
 						j = i + 1
 						i++
 					}
@@ -170,7 +171,7 @@ func (p *Parser) parse(input string) (*[]string, error) {
 				arg = append(arg, ch)
 			} else if !p.singleQuoted && !p.doubleQuoted {
 				if len(arg) > 0 {
-					*p.argv = append(*p.argv, string(arg))
+					*p.tokens = append(*p.tokens, string(arg))
 				}
 				arg = arg[:0]
 			}
@@ -182,9 +183,9 @@ func (p *Parser) parse(input string) (*[]string, error) {
 			if p.singleQuoted || p.doubleQuoted {
 				// prompt user for more input: incomplete/invalid echo command!
 				arg = append(arg, ch)
-				*p.argv = append(*p.argv, string(arg))
+				*p.tokens = append(*p.tokens, string(arg))
 				arg = arg[:0]
-				tmp := strings.Join(*p.argv, " ")
+				tmp := strings.Join(*p.tokens, " ")
 				p.buffer = &tmp
 				return nil, NewUnclosedQuoteError()
 
@@ -192,7 +193,7 @@ func (p *Parser) parse(input string) (*[]string, error) {
 				// we are done
 				// arg = append(arg, ch)
 				if len(arg) > 0 {
-					*p.argv = append(*p.argv, string(arg))
+					*p.tokens = append(*p.tokens, string(arg))
 				}
 				arg = arg[:0]
 			}
@@ -204,8 +205,11 @@ func (p *Parser) parse(input string) (*[]string, error) {
 		}
 	}
 
-	fmt.Printf("p.argv: %v\n", *p.argv)
-	return p.argv, nil
+	// for i, arg := range *p.tokens {
+	// 	fmt.Printf("arg #%s: %s\n", i, arg)
+	// }
+	// fmt.Printf("p.argv: %v\n", *p.argv)
+	return p.tokens, nil
 }
 
 func truncateLeadingZeros(s string) string {
@@ -248,13 +252,14 @@ func isNumber(s string) bool {
 }
 
 func notFound(input string) string {
-	input = removeNewLineIfPresent(input)
+	input = removeNewLinesIfPresent(input)
 	return fmt.Sprintf("%s: not found\n", input)
 }
 
-func removeNewLineIfPresent(s string) string {
+func removeNewLinesIfPresent(s string) string {
 	if strings.HasSuffix(s, "\n") {
-		return string(s[:len(s)-1])
+		return strings.TrimRight(s, "\n")
+		// return string(s[:len(s)-1])
 	}
 	return s
 }
