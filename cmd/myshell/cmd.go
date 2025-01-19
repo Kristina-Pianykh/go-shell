@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,14 +14,16 @@ import (
 )
 
 type Cmd struct {
-	prompt      string
-	tokens      *[]string
-	argv        *[]string
-	argc        int
-	builtins    *[5]string
-	command     *string
-	commandPath *string
-	fds         map[int]*os.File
+	prompt        string
+	promptPrinted bool
+	tokens        *[]string
+	argv          *[]string
+	argc          int
+	builtins      *[5]string
+	command       *string
+	commandPath   *string
+	fds           map[int]*os.File
+	signalC       chan os.Signal
 }
 
 const STDIN = 0
@@ -49,17 +52,19 @@ func NewUnknownOperatorError() error {
 	return &UnknownOperatorError{}
 }
 
-func initCmd() *Cmd {
+func initCmd(signalC chan os.Signal) *Cmd {
 	tokens := []string{}
 	argv := []string{}
 	cmd := &Cmd{
-		prompt:      "$ ",
-		builtins:    &builtins,
-		tokens:      &tokens,
-		argv:        &argv,
-		argc:        0,
-		command:     nil,
-		commandPath: nil,
+		prompt:        "$ ",
+		promptPrinted: false,
+		builtins:      &builtins,
+		tokens:        &tokens,
+		argv:          &argv,
+		argc:          0,
+		command:       nil,
+		commandPath:   nil,
+		signalC:       signalC,
 	}
 	cmd.fds = map[int]*os.File{}
 	for k := range fds {
@@ -69,8 +74,8 @@ func initCmd() *Cmd {
 	return cmd
 }
 
-func (cmd *Cmd) exec() {
-	cmdC := exec.Command(*cmd.command, (*cmd.argv)[1:]...)
+func (cmd *Cmd) exec(ctx context.Context) {
+	cmdC := exec.CommandContext(ctx, *cmd.command, (*cmd.argv)[1:]...)
 	// fmt.Printf("exec(); argv: %v; len(argv): %d\n", *cmd.argv, len(*cmd.argv))
 	var out strings.Builder
 	var stdErr strings.Builder
@@ -277,17 +282,18 @@ func (cmd *Cmd) echo() {
 	fmt.Fprintf(cmd.fds[1], sb.String())
 }
 
-func (cmd *Cmd) exit() {
+func (cmd *Cmd) exit(cancel context.CancelFunc) {
 	if len(*cmd.tokens) != 2 {
 		fmt.Fprintf(os.Stdout, notFound(cmd.getArgv()))
 		return
 	}
-	v, err := strconv.Atoi((*cmd.tokens)[1])
+	_, err := strconv.Atoi((*cmd.tokens)[1])
 	if err != nil {
 		fmt.Fprintf(os.Stdout, notFound(cmd.getArgv()))
 		return
 	}
-	os.Exit(v)
+	cancel()
+	// os.Exit(v)
 }
 
 func (cmd *Cmd) typeCommand() {
