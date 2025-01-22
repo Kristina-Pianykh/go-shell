@@ -264,7 +264,7 @@ func (cmd *Cmd) echo() {
 	fmt.Fprintf(cmd.fds[STDOUT], sb.String())
 }
 
-func (cmd *Cmd) exit(cancelShellCtx context.CancelFunc) error {
+func (cmd *Cmd) exit() error {
 	if len(cmd.argv) != 2 {
 		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.getArgv()))
 		return errors.New(notFound(cmd.getArgv()))
@@ -272,9 +272,9 @@ func (cmd *Cmd) exit(cancelShellCtx context.CancelFunc) error {
 	v, err := strconv.Atoi(cmd.argv[1])
 	if err != nil || v != 0 {
 		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.getArgv()))
-		return errors.New(notFound(cmd.getArgv()))
+		return ExitErr
+		// return errors.New(notFound(cmd.getArgv()))
 	}
-	cancelShellCtx()
 	return nil
 }
 

@@ -15,29 +15,28 @@ func main() {
 	signal.Notify(signalC, os.Interrupt)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	inputCh := make(chan string)
 
 	defer func() {
 		signal.Stop(signalC)
 		cancel()
+		close(inputCh)
 	}()
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			}
+	go readInput(inputCh)
+
+	for {
+		err := repl(ctx, cancel, signalC, inputCh)
+		if errors.Is(err, ExitErr) {
+			return
 		}
-	}()
-
-	repl(ctx, cancel, signalC)
+	}
 }
 
-func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os.Signal) {
+func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os.Signal, inputCh chan string) error {
 	var cmd *Cmd
 	var tokens []string
 	tokenCh := make(chan []string)
-	inputCh := make(chan string)
 	prompt := "$ "
 
 	defer func() {
@@ -46,68 +45,50 @@ func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os
 		}
 	}()
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	fmt.Fprint(os.Stdout, prompt)
+	inputCtx, inputCtxCancel := context.WithCancel(ctx)
+	go parseInput(inputCtx, inputCh, tokenCh)
 
-	go readInput(inputCh)
-
-	for {
-		// always close file descriptos on success or errors
-		if cmd != nil {
-			cmd.closeFds()
-		}
-
-		fmt.Fprint(os.Stdout, prompt)
-
-		// parseCtx, cancelParseCtx := context.WithCancel(ctx)
-		go parseInput(signalC, inputCh, tokenCh)
-
-		select {
-		case <-signalC:
-			// cancelParseCtx()
-			fmt.Println()
-			continue
-		case tokens = <-tokenCh:
-		}
-
-		cmd, err := NewCmd(tokens)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error initializing *Cmd: %s\n", err.Error())
-			continue
-		}
-
-		if errors.As(err, &os.ErrNotExist) || errors.As(err, &os.ErrExist) || errors.As(err, &UnknownOperatorErr) {
-			fmt.Fprintf(cmd.fds[STDERR], "%s\n", err.Error())
-			continue
-		}
-
-		switch {
-		case cmd.command == nil:
-			fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.argv[0]))
-		case *cmd.command == EXIT:
-			// TODO: call original binary instead of doing builtin
-			// graceful shutdown with cancel context instead of killing with no defers run
-			if err := cmd.exit(cancelReplCtx); err == nil {
-				return
-			}
-		case *cmd.command == ECHO:
-			cmd.echo()
-		case *cmd.command == TYPE:
-			cmd.typeCommand()
-		case *cmd.command == PWD:
-			cmd.pwd()
-		case *cmd.command == CD:
-			cmd.cd()
-		case cmd.command != nil && cmd.commandPath != nil:
-			cmd.exec(ctx)
-		}
+	select {
+	case <-signalC:
+		inputCtxCancel()
+		fmt.Println()
+		return SignalInterruptErr
+	case tokens = <-tokenCh:
 	}
+
+	cmd, err := NewCmd(tokens)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error initializing *Cmd: %s\n", err.Error())
+		return errors.New(fmt.Sprintf("Error initializing *Cmd: %s\n", err.Error()))
+	}
+
+	if errors.As(err, &os.ErrNotExist) || errors.As(err, &os.ErrExist) || errors.As(err, &UnknownOperatorErr) {
+		fmt.Fprintf(cmd.fds[STDERR], "%s\n", err.Error())
+		return err
+	}
+
+	switch {
+	case cmd.command == nil:
+		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.argv[0]))
+	case *cmd.command == EXIT:
+		// TODO: call original binary instead of doing builtin
+		// graceful shutdown with cancel context instead of killing with no defers run
+		if err := cmd.exit(); err == nil {
+			return ExitErr
+		}
+	case *cmd.command == ECHO:
+		cmd.echo()
+	case *cmd.command == TYPE:
+		cmd.typeCommand()
+	case *cmd.command == PWD:
+		cmd.pwd()
+	case *cmd.command == CD:
+		cmd.cd()
+	case cmd.command != nil && cmd.commandPath != nil:
+		cmd.exec(ctx)
+	}
+	return nil
 }
 
 func readInput(inputCh chan string) {
@@ -122,7 +103,7 @@ func readInput(inputCh chan string) {
 }
 
 func parseInput(
-	signalCh chan os.Signal,
+	ctx context.Context,
 	inputCh chan string,
 	tokenCh chan []string,
 ) {
@@ -130,9 +111,8 @@ func parseInput(
 
 Loop:
 	select {
-	case <-signalCh:
+	case <-ctx.Done():
 		return
-
 	case input := <-inputCh:
 		tokens, err := parser.parse(input)
 		if err != nil && errors.As(err, &UnclosedQuoteErr) {
