@@ -14,15 +14,7 @@ type Parser struct {
 	doubleQuoted bool
 }
 
-func (p *Parser) clear() {
-	p.currentInput = nil
-	// p.argc = 0
-	p.tokens = nil
-	p.singleQuoted = false
-	p.doubleQuoted = false
-}
-
-func initParser() *Parser {
+func newParser() *Parser {
 	return &Parser{
 		currentInput: nil,
 		// argc:         0,
@@ -32,33 +24,7 @@ func initParser() *Parser {
 	}
 }
 
-type unclosedQuoteError struct{}
-
-func (e *unclosedQuoteError) Error() string {
-	return fmt.Sprintf("Unclosed quote")
-}
-
-func NewUnclosedQuoteError() error {
-	return &unclosedQuoteError{}
-}
-
-type unexpectedNewLine struct {
-}
-
-func (e *unexpectedNewLine) Error() string {
-	return fmt.Sprintf("Unexpected 'newline'")
-}
-
-func NewUnexpectedNewLineError() error {
-	return &unexpectedNewLine{}
-}
-
-var (
-	unclosedQuoteErr     = NewUnclosedQuoteError()
-	unexpectedNewLineErr = NewUnexpectedNewLineError()
-)
-
-func (p *Parser) parse(input string) (*[]string, error) {
+func (p *Parser) parse(input string) ([]string, error) {
 	if p.tokens == nil {
 		p.tokens = &[]string{}
 	}
@@ -114,7 +80,7 @@ func (p *Parser) parse(input string) (*[]string, error) {
 						}
 					}
 					if !foundNonWhiteSpaceCh {
-						return nil, unexpectedNewLineErr
+						return nil, UnexpectedNewLineErr
 					}
 				}
 
@@ -209,7 +175,7 @@ func (p *Parser) parse(input string) (*[]string, error) {
 	// 	fmt.Printf("arg #%s: %s\n", i, arg)
 	// }
 	// fmt.Printf("p.argv: %v\n", *p.argv)
-	return p.tokens, nil
+	return *p.tokens, nil
 }
 
 func truncateLeadingZeros(s string) string {
@@ -259,7 +225,6 @@ func notFound(input string) string {
 func removeNewLinesIfPresent(s string) string {
 	if strings.HasSuffix(s, "\n") {
 		return strings.TrimRight(s, "\n")
-		// return string(s[:len(s)-1])
 	}
 	return s
 }

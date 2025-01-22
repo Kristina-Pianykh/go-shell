@@ -14,9 +14,6 @@ func main() {
 	signalC := make(chan os.Signal, 1)
 	signal.Notify(signalC, os.Interrupt)
 
-	cmd := initCmd(signalC)
-	parser := initParser()
-
 	ctx, cancel := context.WithCancel(context.Background())
 
 	defer func() {
@@ -33,66 +30,73 @@ func main() {
 		}
 	}()
 
-	repl(ctx, cancel, cmd, parser)
+	repl(ctx, cancel, signalC)
 }
 
-func repl(ctx context.Context, cancel context.CancelFunc, cmd *Cmd, parser *Parser) {
-	reader := bufio.NewReader(os.Stdin)
+func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os.Signal) {
+	var cmd *Cmd
+	var tokens []string
+	tokenCh := make(chan []string)
+	inputCh := make(chan string)
+	errorCh := make(chan error)
+	prompt := "$ "
+
+	defer func() {
+		if cmd != nil {
+			cmd.closeFds()
+		}
+	}()
 
 	go func() {
 		for {
 			select {
-			case <-cmd.signalC:
-				fmt.Fprintf(os.Stdout, "\n%s", cmd.prompt)
-				cmd.promptPrinted = true
-				parser.clear()
-				cmd.Reset()
 			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 
-	// Wait for user input
+	go readInput(inputCh, errorCh)
+
 	for {
-		if !cmd.promptPrinted {
-			fmt.Fprint(os.Stdout, cmd.prompt)
-			cmd.promptPrinted = true
+		// always close file descriptos on success or errors
+		if cmd != nil {
+			cmd.closeFds()
 		}
 
-		input, err := reader.ReadString('\n')
+		fmt.Fprint(os.Stdout, prompt)
+
+		// parseCtx, cancelParseCtx := context.WithCancel(ctx)
+		go parseInput(signalC, inputCh, errorCh, tokenCh)
+
+		select {
+		case <-signalC:
+			// cancelParseCtx()
+			fmt.Println()
+			continue
+		case tokens = <-tokenCh:
+		}
+
+		cmd, err := NewCmd(tokens)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error initializing *Cmd: %s\n", err.Error())
 			continue
 		}
-
-		tokens, err := parser.parse(input)
-		if err != nil && errors.Is(err, unclosedQuoteErr) {
-			continue
-		}
-
-		if len(*tokens) < 1 {
-			goto reset
-		}
-
-		cmd.tokens = tokens
-		cmd.setCommandAndPath(&(*tokens)[0])
-		err = cmd.parse(tokens)
 
 		if errors.As(err, &os.ErrNotExist) || errors.As(err, &os.ErrExist) || errors.As(err, &UnknownOperatorErr) {
-			fmt.Fprintf(cmd.fds[2], "%s\n", err.Error())
-			goto reset
+			fmt.Fprintf(cmd.fds[STDERR], "%s\n", err.Error())
+			continue
 		}
-
-		cmd.argc = len(*cmd.argv)
 
 		switch {
 		case cmd.command == nil:
-			fmt.Fprintf(os.Stdout, notFound((*cmd.tokens)[0]))
+			fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.argv[0]))
 		case *cmd.command == EXIT:
 			// TODO: call original binary instead of doing builtin
 			// graceful shutdown with cancel context instead of killing with no defers run
-			cmd.exit(cancel)
-			return
+			if err := cmd.exit(cancelReplCtx); err == nil {
+				return
+			}
 		case *cmd.command == ECHO:
 			cmd.echo()
 		case *cmd.command == TYPE:
@@ -104,10 +108,46 @@ func repl(ctx context.Context, cancel context.CancelFunc, cmd *Cmd, parser *Pars
 		case cmd.command != nil && cmd.commandPath != nil:
 			cmd.exec(ctx)
 		}
+	}
+}
 
-	reset:
-		parser.clear()
-		cmd.Reset()
-		cmd.promptPrinted = false
+func readInput(inputCh chan string, errorCh chan error) {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			errorCh <- err
+		}
+		inputCh <- input
+	}
+}
+
+func parseInput(
+	signalCh chan os.Signal,
+	inputCh chan string,
+	errorCh chan error,
+	tokenCh chan []string,
+) {
+	parser := newParser()
+
+Loop:
+	select {
+	case <-signalCh:
+		return
+	case err := <-errorCh:
+		panic(err)
+
+	case input := <-inputCh:
+		tokens, err := parser.parse(input)
+		if err != nil && errors.As(err, &UnclosedQuoteErr) {
+			goto Loop
+		}
+
+		if len(tokens) < 1 {
+			errorCh <- errors.New(fmt.Sprintf("Error parsing tokens from input '%s'", input))
+		}
+
+		tokenCh <- tokens
+		return
 	}
 }
