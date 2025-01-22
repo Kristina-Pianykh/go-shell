@@ -1,41 +1,41 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
+
+	"golang.org/x/term"
 )
 
 func main() {
 	// FIXME: sigterm as well?
 	signalC := make(chan os.Signal, 1)
 	signal.Notify(signalC, os.Interrupt)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	inputCh := make(chan string)
+	ctx, cancelCtx := context.WithCancel(context.Background())
 
 	defer func() {
 		signal.Stop(signalC)
-		cancel()
-		close(inputCh)
+		cancelCtx()
 	}()
 
-	go readInput(inputCh)
-
 	for {
-		err := repl(ctx, cancel, signalC, inputCh)
+		err := cmdLifecycle(ctx, signalC)
 		if errors.Is(err, ExitErr) {
 			return
 		}
 	}
 }
 
-func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os.Signal, inputCh chan string) error {
-	var cmd *Cmd
-	var tokens []string
+func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
+	var (
+		cmd    *Cmd
+		tokens []string
+		ok     bool
+	)
 	tokenCh := make(chan []string)
 	prompt := "$ "
 
@@ -46,15 +46,14 @@ func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os
 	}()
 
 	fmt.Fprint(os.Stdout, prompt)
-	inputCtx, inputCtxCancel := context.WithCancel(ctx)
-	go parseInput(inputCtx, inputCh, tokenCh)
+	go parseInput(tokenCh)
 
 	select {
-	case <-signalC:
-		inputCtxCancel()
-		fmt.Println()
-		return SignalInterruptErr
-	case tokens = <-tokenCh:
+	case tokens, ok = <-tokenCh:
+		if !ok {
+			fmt.Println()
+			return SignalInterruptErr
+		}
 	}
 
 	cmd, err := NewCmd(tokens)
@@ -91,29 +90,82 @@ func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os
 	return nil
 }
 
+const del = 127
+const cariageReturn = 13
+const newLine = 10
+const sigint = 3
+
 func readInput(inputCh chan string) {
-	reader := bufio.NewReader(os.Stdin)
-	for {
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			panic(err)
+	var err error
+	var oldState *term.State
+	success := false
+
+	oldState, err = term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		panic(err)
+	}
+
+	buf := make([]byte, 1)
+	input := []byte{}
+
+	defer func() {
+		if success {
+			input = append(input, '\n')
+			inputCh <- string(input)
+			fmt.Printf("\r\n")
 		}
-		inputCh <- input
+		term.Restore(int(os.Stdin.Fd()), oldState)
+		close(inputCh)
+	}()
+
+	for {
+		_, err = os.Stdin.Read(buf)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				success = true
+				return
+			} else {
+				panic(err)
+			}
+		}
+		b := buf[0]
+
+		switch b {
+		case sigint:
+			fmt.Printf("^C")
+			return
+		case cariageReturn:
+			success = true
+			return
+		case newLine:
+			success = true
+			return
+		case del:
+			fmt.Print("\x1b[D \x1b[D")
+			input = input[:len(input)-1]
+			continue
+		default:
+			fmt.Printf("%c", b)
+			input = append(input, b)
+		}
 	}
 }
 
 func parseInput(
-	ctx context.Context,
-	inputCh chan string,
 	tokenCh chan []string,
 ) {
 	parser := newParser()
+	inputCh := make(chan string)
+
+	defer close(tokenCh)
 
 Loop:
+	go readInput(inputCh)
 	select {
-	case <-ctx.Done():
-		return
-	case input := <-inputCh:
+	case input, ok := <-inputCh:
+		if !ok {
+			return
+		}
 		tokens, err := parser.parse(input)
 		if err != nil && errors.As(err, &UnclosedQuoteErr) {
 			goto Loop

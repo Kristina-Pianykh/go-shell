@@ -172,9 +172,8 @@ func (p *Parser) parse(input string) ([]string, error) {
 	}
 
 	// for i, arg := range *p.tokens {
-	// 	fmt.Printf("arg #%s: %s\n", i, arg)
+	// 	fmt.Printf("arg #%d: %s\n", i, arg)
 	// }
-	// fmt.Printf("p.argv: %v\n", *p.argv)
 	return *p.tokens, nil
 }
 
