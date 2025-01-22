@@ -163,8 +163,11 @@ func (cmd *Cmd) parse(tokens []string) ([]string, error) {
 
 func (cmd *Cmd) getArgv() string {
 	var sb strings.Builder
-	for _, arg := range cmd.argv {
+	for i, arg := range cmd.argv {
 		sb.WriteString(arg)
+		if i < cmd.argc-1 {
+			sb.WriteString(" ")
+		}
 	}
 	return sb.String()
 }
@@ -266,8 +269,8 @@ func (cmd *Cmd) exit(cancelShellCtx context.CancelFunc) error {
 		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.getArgv()))
 		return errors.New(notFound(cmd.getArgv()))
 	}
-	_, err := strconv.Atoi(cmd.argv[1])
-	if err != nil {
+	v, err := strconv.Atoi(cmd.argv[1])
+	if err != nil || v != 0 {
 		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.getArgv()))
 		return errors.New(notFound(cmd.getArgv()))
 	}
