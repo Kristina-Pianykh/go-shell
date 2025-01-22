@@ -38,7 +38,6 @@ func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os
 	var tokens []string
 	tokenCh := make(chan []string)
 	inputCh := make(chan string)
-	errorCh := make(chan error)
 	prompt := "$ "
 
 	defer func() {
@@ -56,7 +55,7 @@ func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os
 		}
 	}()
 
-	go readInput(inputCh, errorCh)
+	go readInput(inputCh)
 
 	for {
 		// always close file descriptos on success or errors
@@ -67,7 +66,7 @@ func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os
 		fmt.Fprint(os.Stdout, prompt)
 
 		// parseCtx, cancelParseCtx := context.WithCancel(ctx)
-		go parseInput(signalC, inputCh, errorCh, tokenCh)
+		go parseInput(signalC, inputCh, tokenCh)
 
 		select {
 		case <-signalC:
@@ -111,12 +110,12 @@ func repl(ctx context.Context, cancelReplCtx context.CancelFunc, signalC chan os
 	}
 }
 
-func readInput(inputCh chan string, errorCh chan error) {
+func readInput(inputCh chan string) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		input, err := reader.ReadString('\n')
 		if err != nil {
-			errorCh <- err
+			panic(err)
 		}
 		inputCh <- input
 	}
@@ -125,7 +124,6 @@ func readInput(inputCh chan string, errorCh chan error) {
 func parseInput(
 	signalCh chan os.Signal,
 	inputCh chan string,
-	errorCh chan error,
 	tokenCh chan []string,
 ) {
 	parser := newParser()
@@ -134,8 +132,6 @@ Loop:
 	select {
 	case <-signalCh:
 		return
-	case err := <-errorCh:
-		panic(err)
 
 	case input := <-inputCh:
 		tokens, err := parser.parse(input)
@@ -144,7 +140,7 @@ Loop:
 		}
 
 		if len(tokens) < 1 {
-			errorCh <- errors.New(fmt.Sprintf("Error parsing tokens from input '%s'", input))
+			return
 		}
 
 		tokenCh <- tokens
