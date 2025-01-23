@@ -114,9 +114,8 @@ func readInput(inputCh chan string) {
 		if success {
 			input = append(input, '\n')
 			inputCh <- string(input)
-			fmt.Printf("\r\n")
-			// clearPrompt()
 		}
+		fmt.Printf("\r\n")
 		term.Restore(int(os.Stdin.Fd()), oldState)
 		close(inputCh)
 	}()
@@ -137,10 +136,7 @@ func readInput(inputCh chan string) {
 		case sigint:
 			fmt.Printf("^C")
 			return
-		case cariageReturn:
-			success = true
-			return
-		case newLine:
+		case cariageReturn, newLine:
 			success = true
 			return
 		case tab:
