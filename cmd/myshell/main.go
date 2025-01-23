@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 
 	"golang.org/x/term"
 )
@@ -58,7 +59,6 @@ func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
 
 	cmd, err := NewCmd(tokens)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error initializing *Cmd: %s\n", err.Error())
 		return errors.New(fmt.Sprintf("Error initializing *Cmd: %s\n", err.Error()))
 	}
 
@@ -94,7 +94,9 @@ const del = 127
 const cariageReturn = 13
 const newLine = 10
 const sigint = 3
+const tab = 9
 
+// TODO: don't allow cursor moves outside of input buffer boundary
 func readInput(inputCh chan string) {
 	var err error
 	var oldState *term.State
@@ -113,6 +115,7 @@ func readInput(inputCh chan string) {
 			input = append(input, '\n')
 			inputCh <- string(input)
 			fmt.Printf("\r\n")
+			// clearPrompt()
 		}
 		term.Restore(int(os.Stdin.Fd()), oldState)
 		close(inputCh)
@@ -140,15 +143,53 @@ func readInput(inputCh chan string) {
 		case newLine:
 			success = true
 			return
+		case tab:
+			success = true
+			if cmpl, ok := autocomplete(input); ok {
+				clearPrompt()
+
+				input = cmpl
+				input = append(input, ' ')
+
+				for i := range input {
+					fmt.Printf("%c", input[i])
+				}
+			}
 		case del:
-			fmt.Print("\x1b[D \x1b[D")
-			input = input[:len(input)-1]
+			if len(input) > 0 {
+				fmt.Print("\x1b[D \x1b[D")
+				input = input[:len(input)-1]
+			}
 			continue
 		default:
 			fmt.Printf("%c", b)
 			input = append(input, b)
 		}
 	}
+}
+
+func autocomplete(s []byte) ([]byte, bool) {
+	clean := strings.TrimLeft(string(s), " \t")
+	offset := len(s) - len(clean)
+
+	for _, builtin := range builtins {
+		if len(clean) > 0 && strings.HasPrefix(builtin, clean) {
+			new := []byte{}
+
+			for i := range offset {
+				new = append(new, s[i])
+			}
+			new = append(new, builtin...)
+			return new, true
+		}
+	}
+	return s, false
+}
+
+func clearPrompt() {
+	fmt.Print("\x1b[2K\r")
+	// TODO set prompt as a global variable
+	fmt.Printf("$ ")
 }
 
 func parseInput(
