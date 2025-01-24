@@ -89,8 +89,10 @@ func (cmd *Cmd) redirectFd(fd int, filePath, op string) error {
 	// TODO: do we validate the fd value?
 	switch op {
 	case ">":
+		mkParentDirIfAbsent(filePath)
 		file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_EXCL|os.O_CREATE, 0644)
-		if errors.As(err, &os.ErrExist) {
+		if errors.Is(err, os.ErrExist) {
+			// panic(err)
 			return err
 		}
 		if err != nil {
@@ -99,6 +101,7 @@ func (cmd *Cmd) redirectFd(fd int, filePath, op string) error {
 
 		cmd.fds[fd] = file
 	case ">|":
+		mkParentDirIfAbsent(filePath)
 		file, err := os.OpenFile(filePath, os.O_RDWR|os.O_TRUNC|os.O_CREATE, 0644)
 		if err != nil {
 			panic(err) // FIXME: any relevant errors?
@@ -121,6 +124,17 @@ func (cmd *Cmd) redirectFd(fd int, filePath, op string) error {
 		return UnknownOperatorErr
 	}
 	return nil
+}
+
+func mkParentDirIfAbsent(path string) {
+	dir := filepath.Dir(path)
+	_, err := os.Stat(dir)
+	if os.IsNotExist(err) {
+		err := os.MkdirAll(dir, 0750)
+		if err != nil {
+			panic(err)
+		}
+	}
 }
 
 func (cmd *Cmd) parse(tokens []string) ([]string, error) {
@@ -266,6 +280,9 @@ func (cmd *Cmd) echo() {
 			sb.WriteString("\n")
 		}
 	}
+	// if !strings.HasSuffix(sb.String(), "\n") {
+	// 	sb.WriteString("\n")
+	// }
 	fmt.Fprintf(cmd.fds[STDOUT], sb.String())
 }
 

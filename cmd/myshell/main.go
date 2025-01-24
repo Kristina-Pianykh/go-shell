@@ -59,6 +59,7 @@ func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
 
 	cmd, err := NewCmd(tokens)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		return errors.New(fmt.Sprintf("Error initializing *Cmd: %s\n", err.Error()))
 	}
 
@@ -67,6 +68,7 @@ func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
 		return err
 	}
 
+	// fmt.Printf("argv: %s\n", cmd.getArgv())
 	switch {
 	case cmd.command == nil:
 		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.argv[0]))
@@ -111,12 +113,15 @@ func readInput(inputCh chan string) {
 	input := []byte{}
 
 	defer func() {
+		input = append(input, '\n')
 		if success {
-			input = append(input, '\n')
 			inputCh <- string(input)
 		}
 		fmt.Printf("\r\n")
-		term.Restore(int(os.Stdin.Fd()), oldState)
+		err := term.Restore(int(os.Stdin.Fd()), oldState)
+		if err != nil {
+			panic(err)
+		}
 		close(inputCh)
 	}()
 
