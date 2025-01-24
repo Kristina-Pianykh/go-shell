@@ -5,9 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strings"
+	"syscall"
 
 	"golang.org/x/term"
 )
@@ -174,10 +178,10 @@ func readInput(inputCh chan string) {
 func autocomplete(s []byte) ([]byte, bool) {
 	clean := strings.TrimLeft(string(s), " \t")
 	offset := len(s) - len(clean)
+	new := []byte{}
 
 	for _, builtin := range builtins {
 		if len(clean) > 0 && strings.HasPrefix(builtin, clean) {
-			new := []byte{}
 
 			for i := range offset {
 				new = append(new, s[i])
@@ -186,7 +190,66 @@ func autocomplete(s []byte) ([]byte, bool) {
 			return new, true
 		}
 	}
+
+	fmt.Printf("checking PATH")
+	if path, err := exec.LookPath(clean); err == nil {
+		bin := filepath.Base(path)
+		info, err := os.Stat(bin)
+		if err != nil {
+			return s, false
+		}
+		perm := info.Mode().Perm()
+		fmt.Printf("perm: %v\n", perm)
+
+		for i := range offset {
+			new = append(new, s[i])
+		}
+		new = append(new, bin...)
+		return new, true
+	}
+
 	return s, false
+}
+
+func searchPath(file string) (string, bool) {
+	if strings.Contains(file, "/") {
+		err := findExecutable(file)
+		if err == nil {
+			return file, true
+		}
+		return "", false
+	}
+	path := os.Getenv("PATH")
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			// Unix shell semantics: path element "" means "."
+			dir = "."
+		}
+		path := filepath.Join(dir, file)
+		if err := findExecutable(path); err == nil {
+			if !filepath.IsAbs(path) {
+				return "", false
+			}
+			return path, true
+		}
+	}
+	return "", false
+}
+
+func findExecutable(file string) error {
+	d, err := os.Stat(file)
+	if err != nil {
+		return err
+	}
+	m := d.Mode()
+	if m.IsDir() {
+		return syscall.EISDIR
+	}
+	// at least one of the execute bits (owner, group, or others) is set
+	if m&0111 != 0 {
+		return nil
+	}
+	return fs.ErrPermission
 }
 
 func clearPrompt() {
