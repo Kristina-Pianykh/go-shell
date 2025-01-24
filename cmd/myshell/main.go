@@ -146,7 +146,9 @@ func readInput(inputCh chan string) {
 			return
 		case tab:
 			success = true
-			if cmpl, ok := autocomplete(input); ok {
+			if cmpl, ok := autocomplete(input); !ok {
+				fmt.Fprintf(os.Stdout, "%c\n", '\a')
+			} else {
 				clearPrompt()
 
 				input = cmpl
