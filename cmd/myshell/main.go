@@ -144,7 +144,7 @@ func readInput(inputCh chan string) {
 			return
 		case tab:
 			if cmpl, ok := autocomplete(input); !ok {
-				fmt.Fprintf(os.Stdout, "%c\n", '\a')
+				fmt.Fprintf(os.Stdout, "%c", '\a')
 			} else {
 				clearPrompt()
 
@@ -186,51 +186,66 @@ func autocomplete(s []byte) ([]byte, bool) {
 	}
 
 	// fmt.Printf("checking PATH")
-	// if path, err := exec.LookPath(clean); err == nil {
-	// 	bin := filepath.Base(path)
-	// 	info, err := os.Stat(bin)
-	// 	if err != nil {
-	// 		return s, false
-	// 	}
-	// 	perm := info.Mode().Perm()
-	// 	fmt.Printf("perm: %v\n", perm)
-	//
-	// 	for i := range offset {
-	// 		new = append(new, s[i])
-	// 	}
-	// 	new = append(new, bin...)
-	// 	return new, true
-	// }
+	if file, found := searchPath(clean); found {
+		for i := range offset {
+			new = append(new, s[i])
+		}
+		new = append(new, file...)
+		return new, true
+	}
 
 	return s, false
 }
 
-func searchPath(file string) (string, bool) {
-	if strings.Contains(file, "/") {
-		err := findExecutable(file)
-		if err == nil {
-			return file, true
-		}
-		return "", false
-	}
+func searchPath(prefix string) (string, bool) {
+	// if file is a path
+	// TODO: fix with the idea that `file` is incomplete
+	// if strings.Contains(prefix, "/") {
+	// 	err := isExec(prefix)
+	// 	if err == nil {
+	// 		return prefix, true
+	// 	}
+	// 	return "", false
+	// }
+	// if file is a binary name
 	path := os.Getenv("PATH")
 	for _, dir := range filepath.SplitList(path) {
+		// fmt.Printf("dir: %s\r\n", dir)
 		if dir == "" {
 			// Unix shell semantics: path element "" means "."
 			dir = "."
 		}
-		path := filepath.Join(dir, file)
-		if err := findExecutable(path); err == nil {
-			if !filepath.IsAbs(path) {
-				return "", false
-			}
-			return path, true
+		entry, err := os.ReadDir(dir)
+		if err != nil {
+			panic(err)
 		}
+		for _, e := range entry {
+			// TODO: use binary search
+			// TODO: give options on multiple options?
+			if strings.HasPrefix(e.Name(), prefix) {
+				// fmt.Printf("entry: %s\r\n", e.Name())
+
+				execPath := filepath.Join(dir, e.Name())
+				if err := isExec(execPath); err == nil {
+					return e.Name(), true
+					// } else {
+					// 	panic(err)
+				}
+			}
+		}
+		// path := filepath.Join(dir, file)
+		// // fmt.Printf("path: %s\r\n", path)
+		// if err := isExec(path); err == nil {
+		// 	if !filepath.IsAbs(path) {
+		// 		return "", false
+		// 	}
+		// 	return path, true
+		// }
 	}
 	return "", false
 }
 
-func findExecutable(file string) error {
+func isExec(file string) error {
 	d, err := os.Stat(file)
 	if err != nil {
 		return err
