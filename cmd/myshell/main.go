@@ -7,7 +7,6 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
@@ -51,6 +50,7 @@ func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
 	}()
 
 	fmt.Fprint(os.Stdout, prompt)
+	os.Stdout.Sync()
 	go parseInput(tokenCh)
 
 	select {
@@ -72,7 +72,6 @@ func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
 		return err
 	}
 
-	// fmt.Printf("argv: %s\n", cmd.getArgv())
 	switch {
 	case cmd.command == nil:
 		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.argv[0]))
@@ -105,27 +104,21 @@ const tab = 9
 // TODO: don't allow cursor moves outside of input buffer boundary
 func readInput(inputCh chan string) {
 	var err error
-	var oldState *term.State
-	success := false
 
-	oldState, err = term.MakeRaw(int(os.Stdin.Fd()))
+	// logFile, err := os.OpenFile("keylog.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
 		panic(err)
 	}
+	// defer logFile.Close()
 
 	buf := make([]byte, 1)
 	input := []byte{}
 
 	defer func() {
+		fmt.Fprint(os.Stdout, "\r\n")
+		os.Stdout.Sync()
 		input = append(input, '\n')
-		if success {
-			inputCh <- string(input)
-		}
-		fmt.Printf("\r\n")
-		err := term.Restore(int(os.Stdin.Fd()), oldState)
-		if err != nil {
-			panic(err)
-		}
+		inputCh <- string(input)
 		close(inputCh)
 	}()
 
@@ -133,23 +126,23 @@ func readInput(inputCh chan string) {
 		_, err = os.Stdin.Read(buf)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
-				success = true
 				return
 			} else {
 				panic(err)
 			}
 		}
 		b := buf[0]
+		// fmt.Fprintf(logFile, "Received byte: %d (char: %q)\n", b, b)
+		// _ = logFile.Sync()
 
 		switch b {
 		case sigint:
 			fmt.Printf("^C")
+			input = []byte{}
 			return
 		case cariageReturn, newLine:
-			success = true
 			return
 		case tab:
-			success = true
 			if cmpl, ok := autocomplete(input); !ok {
 				fmt.Fprintf(os.Stdout, "%c\n", '\a')
 			} else {
@@ -169,8 +162,9 @@ func readInput(inputCh chan string) {
 			}
 			continue
 		default:
-			fmt.Printf("%c", b)
 			input = append(input, b)
+			clearPrompt()
+			fmt.Printf("%s", input)
 		}
 	}
 }
@@ -191,22 +185,22 @@ func autocomplete(s []byte) ([]byte, bool) {
 		}
 	}
 
-	fmt.Printf("checking PATH")
-	if path, err := exec.LookPath(clean); err == nil {
-		bin := filepath.Base(path)
-		info, err := os.Stat(bin)
-		if err != nil {
-			return s, false
-		}
-		perm := info.Mode().Perm()
-		fmt.Printf("perm: %v\n", perm)
-
-		for i := range offset {
-			new = append(new, s[i])
-		}
-		new = append(new, bin...)
-		return new, true
-	}
+	// fmt.Printf("checking PATH")
+	// if path, err := exec.LookPath(clean); err == nil {
+	// 	bin := filepath.Base(path)
+	// 	info, err := os.Stat(bin)
+	// 	if err != nil {
+	// 		return s, false
+	// 	}
+	// 	perm := info.Mode().Perm()
+	// 	fmt.Printf("perm: %v\n", perm)
+	//
+	// 	for i := range offset {
+	// 		new = append(new, s[i])
+	// 	}
+	// 	new = append(new, bin...)
+	// 	return new, true
+	// }
 
 	return s, false
 }
@@ -262,19 +256,31 @@ func parseInput(
 	tokenCh chan []string,
 ) {
 	parser := newParser()
-	inputCh := make(chan string)
 
-	defer close(tokenCh)
+	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
+	if err != nil {
+		panic(err)
+	}
+
+	defer func() {
+		close(tokenCh)
+		err := term.Restore(int(os.Stdin.Fd()), oldState)
+		if err != nil {
+			panic(err)
+		}
+	}()
 
 Loop:
+	inputCh := make(chan string)
 	go readInput(inputCh)
 	select {
 	case input, ok := <-inputCh:
-		if !ok {
+		if !ok || len(input) == 0 {
 			return
 		}
 		tokens, err := parser.parse(input)
 		if err != nil && errors.As(err, &UnclosedQuoteErr) {
+			fmt.Printf("$ ")
 			goto Loop
 		}
 

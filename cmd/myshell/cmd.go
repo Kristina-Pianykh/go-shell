@@ -272,6 +272,7 @@ func (cmd *Cmd) setCommandAndPath() {
 
 func (cmd *Cmd) echo() {
 	var sb strings.Builder
+
 	for i := 1; i < cmd.argc; i++ {
 		sb.WriteString(cmd.argv[i])
 		if i < cmd.argc-1 {
@@ -280,9 +281,6 @@ func (cmd *Cmd) echo() {
 			sb.WriteString("\n")
 		}
 	}
-	// if !strings.HasSuffix(sb.String(), "\n") {
-	// 	sb.WriteString("\n")
-	// }
 	fmt.Fprintf(cmd.fds[STDOUT], sb.String())
 }
 
