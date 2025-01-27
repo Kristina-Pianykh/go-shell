@@ -48,6 +48,7 @@ func readInput(inputCh chan string) {
 		close(inputCh)
 	}()
 
+	bellCnt := 0
 	for {
 		_, err = os.Stdin.Read(buf)
 		if err != nil {
@@ -69,7 +70,8 @@ func readInput(inputCh chan string) {
 		case cariageReturn, newLine:
 			return
 		case tab:
-			if clean := stripLeft(input); len(clean) == 0 {
+			trimmedInput := stripLeft(input)
+			if len(trimmedInput) == 0 {
 				input = append(input, tab)
 				clearLine()
 				drawPrompt()
@@ -92,18 +94,27 @@ func readInput(inputCh chan string) {
 			if len(matches) == 0 {
 				ringBell()
 			} else if len(matches) > 1 {
-				// fmt.Fprint(os.Stdout, "\r\n")
-				// for _, match := range matches {
-				// 	fmt.Fprintf(os.Stdout, "%s  ", match)
-				// }
-				// fmt.Fprint(os.Stdout, "\r\n")
-				// drawPrompt()
 
 				commonPrefix := commonPrefix(matches)
-				input = cmplInput(input, commonPrefix)
-				clearLine()
-				drawPrompt()
-				fmt.Fprintf(os.Stdout, "%s", input)
+				if len(commonPrefix) > len(trimmedInput) {
+					input = cmplInput(input, commonPrefix)
+					clearLine()
+					drawPrompt()
+					fmt.Fprintf(os.Stdout, "%s", input)
+				} else if commonPrefix == string(trimmedInput) {
+					if bellCnt == 0 {
+						ringBell()
+						bellCnt++
+						break
+					}
+					fmt.Fprint(os.Stdout, "\r\n")
+					for _, match := range matches {
+						fmt.Fprintf(os.Stdout, "%s  ", match)
+					}
+					fmt.Fprint(os.Stdout, "\r\n")
+					drawPrompt()
+					fmt.Fprintf(os.Stdout, "%s", input)
+				}
 			} else {
 				clearLine()
 				drawPrompt()
@@ -121,6 +132,7 @@ func readInput(inputCh chan string) {
 			}
 			continue
 		default:
+			bellCnt = 0
 			input = append(input, b)
 			clearLine()
 			drawPrompt()
@@ -158,27 +170,75 @@ func autocompleteBuiltin(s []byte) []string {
 
 const MAX_INT = int((uint(1) << 63) - 1)
 
-func commonPrefix(lst []string) string {
-	minPrefixLen := MAX_INT
+func sharePrefix(lst []string, prefix []byte) []string {
+	sharePrefix := []string{}
+
 	for _, e := range lst {
-		if len(e) < minPrefixLen {
-			minPrefixLen = len(e)
+		if !strings.HasPrefix(e, string(prefix)) {
+			continue
+		}
+		sharePrefix = append(sharePrefix, e)
+	}
+	return sharePrefix
+}
+
+func commonPrefix(lst []string) string {
+	maxPrefixLen := MAX_INT
+	for _, e := range lst {
+		if len(e) < maxPrefixLen {
+			maxPrefixLen = len(e)
 		}
 	}
+	// fmt.Printf("max prefix possible: %d\n", maxPrefixLen)
 
-	for ln := minPrefixLen; ln > 0; ln-- {
+	for ln := maxPrefixLen; ln > 0; ln-- {
 		prefix := lst[0][:ln]
-		for i, e := range lst {
+		share := 0
+
+		for _, e := range lst {
 			if !strings.HasPrefix(e, prefix) {
-				break
+				continue
 			}
-			if i == len(lst)-1 {
-				return prefix
-			}
+			share++
+		}
+		if share == len(lst) {
+			return prefix
 		}
 	}
 	return ""
 }
+
+// func commonPrefix(lst []string) (string, bool) {
+// 	maxPrefixLen := MAX_INT
+// 	for _, e := range lst {
+// 		if len(e) < maxPrefixLen {
+// 			maxPrefixLen = len(e)
+// 		}
+// 	}
+// 	// fmt.Printf("max prefix possible: %d\n", maxPrefixLen)
+// 	for _, i := range lst {
+// 		if len(i) < maxPrefixLen {
+// 			continue
+// 		}
+// 		for _, j := range lst {
+// 			if !strings.HasPrefix(j, i) {
+// 				continue
+// 			}
+// 			return i, true
+// 		}
+// 	}
+//
+// 	for ln := maxPrefixLen; ln > 0; ln-- {
+// 		prefix := lst[0][:ln]
+// 		for _, e := range lst {
+// 			if !strings.HasPrefix(e, prefix) {
+// 				continue
+// 			}
+// 		}
+// 		return prefix, false
+// 	}
+// 	return "", false
+// }
 
 func autocompleteBin(s []byte) []string {
 	clean := strings.TrimLeft(string(s), " \t")
