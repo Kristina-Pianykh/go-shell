@@ -95,11 +95,19 @@ func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
 	return nil
 }
 
-const del = 127
-const cariageReturn = 13
-const newLine = 10
-const sigint = 3
-const tab = 9
+const (
+	del           = 127
+	cariageReturn = 13
+	newLine       = 10
+	sigint        = 3
+	tab           = 9
+	bell          = 7
+)
+
+func ringBell() {
+	os.Stdout.Write([]byte{'\a'})
+	os.Stdout.Sync()
+}
 
 // TODO: don't allow cursor moves outside of input buffer boundary
 func readInput(inputCh chan string) {
@@ -143,8 +151,16 @@ func readInput(inputCh chan string) {
 		case cariageReturn, newLine:
 			return
 		case tab:
+			if clean := stripLeft(input); len(clean) == 0 {
+				input = append(input, tab)
+				clearPrompt()
+				fmt.Printf("%s", input)
+				break
+			}
 			if cmpl, ok := autocomplete(input); !ok {
-				fmt.Fprintf(os.Stdout, "%c", '\a')
+				ringBell()
+				// fmt.Fprintf(os.Stdout, "%c", bell)
+				// os.Stdout.Sync()
 			} else {
 				clearPrompt()
 
@@ -197,6 +213,10 @@ func autocomplete(s []byte) ([]byte, bool) {
 	return s, false
 }
 
+func stripLeft(s []byte) []byte {
+	return []byte(strings.TrimLeft(string(s), "\t "))
+}
+
 func searchPath(prefix string) (string, bool) {
 	// if file is a path
 	// TODO: fix with the idea that `file` is incomplete
@@ -227,6 +247,10 @@ func searchPath(prefix string) (string, bool) {
 
 				execPath := filepath.Join(dir, e.Name())
 				if err := isExec(execPath); err == nil {
+					// if strings.HasPrefix(prefix, "x") {
+					// 	fmt.Printf("%c", '\a')
+					// 	return "", false
+					// }
 					return e.Name(), true
 					// } else {
 					// 	panic(err)
