@@ -4,15 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
-	"syscall"
-
-	"golang.org/x/term"
 )
 
 func main() {
@@ -27,14 +20,14 @@ func main() {
 	}()
 
 	for {
-		err := cmdLifecycle(ctx, signalC)
+		err := cmdLifecycle(ctx)
 		if errors.Is(err, ExitErr) {
 			return
 		}
 	}
 }
 
-func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
+func cmdLifecycle(ctx context.Context) error {
 	var (
 		cmd    *Cmd
 		tokens []string
@@ -63,13 +56,12 @@ func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
 
 	cmd, err := NewCmd(tokens)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrExist) || errors.Is(err, UnknownOperatorErr) {
+			fmt.Fprintf(cmd.fds[STDERR], "%s\n", err.Error())
+			return err
+		}
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		return errors.New(fmt.Sprintf("Error initializing *Cmd: %s\n", err.Error()))
-	}
-
-	if errors.As(err, &os.ErrNotExist) || errors.As(err, &os.ErrExist) || errors.As(err, &UnknownOperatorErr) {
-		fmt.Fprintf(cmd.fds[STDERR], "%s\n", err.Error())
-		return err
 	}
 
 	switch {
@@ -93,241 +85,4 @@ func cmdLifecycle(ctx context.Context, signalC chan os.Signal) error {
 		cmd.exec(ctx)
 	}
 	return nil
-}
-
-const (
-	del           = 127
-	cariageReturn = 13
-	newLine       = 10
-	sigint        = 3
-	tab           = 9
-	bell          = 7
-)
-
-func ringBell() {
-	os.Stdout.Write([]byte{'\a'})
-	os.Stdout.Sync()
-}
-
-// TODO: don't allow cursor moves outside of input buffer boundary
-func readInput(inputCh chan string) {
-	var err error
-
-	// logFile, err := os.OpenFile("keylog.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		panic(err)
-	}
-	// defer logFile.Close()
-
-	buf := make([]byte, 1)
-	input := []byte{}
-
-	defer func() {
-		fmt.Fprint(os.Stdout, "\r\n")
-		os.Stdout.Sync()
-		input = append(input, '\n')
-		inputCh <- string(input)
-		close(inputCh)
-	}()
-
-	for {
-		_, err = os.Stdin.Read(buf)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			} else {
-				panic(err)
-			}
-		}
-		b := buf[0]
-		// fmt.Fprintf(logFile, "Received byte: %d (char: %q)\n", b, b)
-		// _ = logFile.Sync()
-
-		switch b {
-		case sigint:
-			fmt.Printf("^C")
-			input = []byte{}
-			return
-		case cariageReturn, newLine:
-			return
-		case tab:
-			if clean := stripLeft(input); len(clean) == 0 {
-				input = append(input, tab)
-				clearPrompt()
-				fmt.Printf("%s", input)
-				break
-			}
-			if cmpl, ok := autocomplete(input); !ok {
-				ringBell()
-				// fmt.Fprintf(os.Stdout, "%c", bell)
-				// os.Stdout.Sync()
-			} else {
-				clearPrompt()
-
-				input = cmpl
-				input = append(input, ' ')
-
-				for i := range input {
-					fmt.Printf("%c", input[i])
-				}
-			}
-		case del:
-			if len(input) > 0 {
-				fmt.Print("\x1b[D \x1b[D")
-				input = input[:len(input)-1]
-			}
-			continue
-		default:
-			input = append(input, b)
-			clearPrompt()
-			fmt.Printf("%s", input)
-		}
-	}
-}
-
-func autocomplete(s []byte) ([]byte, bool) {
-	clean := strings.TrimLeft(string(s), " \t")
-	offset := len(s) - len(clean)
-	new := []byte{}
-
-	for _, builtin := range builtins {
-		if len(clean) > 0 && strings.HasPrefix(builtin, clean) {
-
-			for i := range offset {
-				new = append(new, s[i])
-			}
-			new = append(new, builtin...)
-			return new, true
-		}
-	}
-
-	// fmt.Printf("checking PATH")
-	if file, found := searchPath(clean); found {
-		for i := range offset {
-			new = append(new, s[i])
-		}
-		new = append(new, file...)
-		return new, true
-	}
-
-	return s, false
-}
-
-func stripLeft(s []byte) []byte {
-	return []byte(strings.TrimLeft(string(s), "\t "))
-}
-
-func searchPath(prefix string) (string, bool) {
-	// if file is a path
-	// TODO: fix with the idea that `file` is incomplete
-	// if strings.Contains(prefix, "/") {
-	// 	err := isExec(prefix)
-	// 	if err == nil {
-	// 		return prefix, true
-	// 	}
-	// 	return "", false
-	// }
-	// if file is a binary name
-	path := os.Getenv("PATH")
-	for _, dir := range filepath.SplitList(path) {
-		// fmt.Printf("dir: %s\r\n", dir)
-		if dir == "" {
-			// Unix shell semantics: path element "" means "."
-			dir = "."
-		}
-		entry, err := os.ReadDir(dir)
-		if err != nil {
-			panic(err)
-		}
-		for _, e := range entry {
-			// TODO: use binary search
-			// TODO: give options on multiple options?
-			if strings.HasPrefix(e.Name(), prefix) {
-				// fmt.Printf("entry: %s\r\n", e.Name())
-
-				execPath := filepath.Join(dir, e.Name())
-				if err := isExec(execPath); err == nil {
-					// if strings.HasPrefix(prefix, "x") {
-					// 	fmt.Printf("%c", '\a')
-					// 	return "", false
-					// }
-					return e.Name(), true
-					// } else {
-					// 	panic(err)
-				}
-			}
-		}
-		// path := filepath.Join(dir, file)
-		// // fmt.Printf("path: %s\r\n", path)
-		// if err := isExec(path); err == nil {
-		// 	if !filepath.IsAbs(path) {
-		// 		return "", false
-		// 	}
-		// 	return path, true
-		// }
-	}
-	return "", false
-}
-
-func isExec(file string) error {
-	d, err := os.Stat(file)
-	if err != nil {
-		return err
-	}
-	m := d.Mode()
-	if m.IsDir() {
-		return syscall.EISDIR
-	}
-	// at least one of the execute bits (owner, group, or others) is set
-	if m&0111 != 0 {
-		return nil
-	}
-	return fs.ErrPermission
-}
-
-func clearPrompt() {
-	fmt.Print("\x1b[2K\r")
-	// TODO set prompt as a global variable
-	fmt.Printf("$ ")
-}
-
-func parseInput(
-	tokenCh chan []string,
-) {
-	parser := newParser()
-
-	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
-	if err != nil {
-		panic(err)
-	}
-
-	defer func() {
-		close(tokenCh)
-		err := term.Restore(int(os.Stdin.Fd()), oldState)
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-Loop:
-	inputCh := make(chan string)
-	go readInput(inputCh)
-	select {
-	case input, ok := <-inputCh:
-		if !ok || len(input) == 0 {
-			return
-		}
-		tokens, err := parser.parse(input)
-		if err != nil && errors.As(err, &UnclosedQuoteErr) {
-			fmt.Printf("$ ")
-			goto Loop
-		}
-
-		if len(tokens) < 1 {
-			return
-		}
-
-		tokenCh <- tokens
-		return
-	}
 }

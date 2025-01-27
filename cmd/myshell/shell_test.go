@@ -19,7 +19,13 @@ func TestIsNumber(t *testing.T) {
 	}
 }
 
-func TestSplitAt(t *testing.T) {
-	argv, path := splitAtRedirectOp(&[]string{"echo", "hello", ">>", "test.txt"}, ">>")
-	fmt.Printf("%v, %v\n", argv, path)
+func TestCommonPrefix(t *testing.T) {
+	lst := []string{
+		"callgraph", "cargo", "cargo-clippy", "cargo-fmt", "cargo-miri", "catman", "caca-config", "cacaclock", "cacademo", "cacafire", "cacaplay", "cacaserver", "cacaview", "cairo-trace", "cal", "calfjackhost", "canberra-boot", "canberra-gtk-play", "capsh", "captest", "captoinfo",
+	}
+	fmt.Printf("common prefix: %s\n", commonPrefix(lst))
+	lst = []string{
+		"xyz_bar", "xyz_baz", "xyz_quz",
+	}
+	fmt.Printf("common prefix: %s\n", commonPrefix(lst))
 }
