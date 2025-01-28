@@ -24,7 +24,6 @@ const (
 
 func ringBell() {
 	os.Stdout.Write([]byte{'\a'})
-	os.Stdout.Sync()
 }
 
 // TODO: don't allow cursor moves outside of input buffer boundary
@@ -83,6 +82,7 @@ func readInput(inputCh chan string) {
 				clearLine()
 				drawPrompt()
 				input = []byte(matches[0])
+				input = append(input, ' ')
 				fmt.Printf("%s", input)
 				break
 			}
@@ -223,7 +223,9 @@ func searchPath(prefix string) []string {
 		}
 		entry, err := os.ReadDir(dir)
 		if err != nil {
-			panic(err)
+			if !errors.Is(err, fs.ErrNotExist) {
+				panic(err)
+			}
 		}
 		for _, e := range entry {
 			// TODO: use binary search
