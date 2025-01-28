@@ -10,9 +10,9 @@ This is a fun little project for me to get more familiar with Go, its Stdlib and
 - File System navigation
 - File descriptor redirection with `[fd]>[|]` and `>>`
 - SIGINT handling for cancelling a currently running process or not yet entered input on `Ctrl+C`
+- Autocomplete with `Tab` for shell builtins and executables on `PATH`
 
 ## Next Up:
 
-- Autocomplete with `Tab`
 - Piping
 - Flashy interface
