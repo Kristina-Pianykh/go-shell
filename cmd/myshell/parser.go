@@ -17,7 +17,6 @@ type Parser struct {
 func newParser() *Parser {
 	return &Parser{
 		currentInput: nil,
-		// argc:         0,
 		tokens:       nil,
 		singleQuoted: false,
 		doubleQuoted: false,

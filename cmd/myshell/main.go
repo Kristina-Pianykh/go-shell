@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 )
 
+const prompt = "$ "
+
 func main() {
-	// FIXME: sigterm as well?
 	signalC := make(chan os.Signal, 1)
 	signal.Notify(signalC, os.Interrupt)
 	ctx, cancelCtx := context.WithCancel(context.Background())
@@ -34,7 +36,6 @@ func cmdLifecycle(ctx context.Context) error {
 		ok     bool
 	)
 	tokenCh := make(chan []string)
-	prompt := "$ "
 
 	defer func() {
 		if cmd != nil {
@@ -56,8 +57,8 @@ func cmdLifecycle(ctx context.Context) error {
 
 	cmd, err := NewCmd(tokens)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrExist) || errors.Is(err, UnknownOperatorErr) {
-			fmt.Fprintf(cmd.fds[STDERR], "%s\n", err.Error())
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrExist) || errors.Is(err, UnknownOperatorErr) {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 			return err
 		}
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
