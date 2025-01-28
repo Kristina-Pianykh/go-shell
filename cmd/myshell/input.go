@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 
@@ -47,7 +48,6 @@ func readInput(inputCh chan string) {
 		close(inputCh)
 	}()
 
-	autocmplBell := 0
 	for {
 		_, err = os.Stdin.Read(buf)
 		if err != nil {
@@ -92,21 +92,18 @@ func readInput(inputCh chan string) {
 			if len(matches) == 0 {
 				ringBell()
 			} else if len(matches) > 1 {
-				if autocmplBell == 0 {
-					ringBell()
-					autocmplBell++
-				} else {
-					fmt.Fprint(os.Stdout, "\r\n")
-					for _, match := range matches {
-						fmt.Fprintf(os.Stdout, "%s  ", match)
-					}
-					fmt.Fprint(os.Stdout, "\r\n")
-					drawPrompt()
+				// fmt.Fprint(os.Stdout, "\r\n")
+				// for _, match := range matches {
+				// 	fmt.Fprintf(os.Stdout, "%s  ", match)
+				// }
+				// fmt.Fprint(os.Stdout, "\r\n")
+				// drawPrompt()
 
-					commonPrefix := commonPrefix(matches)
-					input = cmplInput(input, commonPrefix)
-					fmt.Fprintf(os.Stdout, "%s", input)
-				}
+				commonPrefix := commonPrefix(matches)
+				input = cmplInput(input, commonPrefix)
+				clearLine()
+				drawPrompt()
+				fmt.Fprintf(os.Stdout, "%s", input)
 			} else {
 				clearLine()
 				drawPrompt()
@@ -124,7 +121,6 @@ func readInput(inputCh chan string) {
 			}
 			continue
 		default:
-			autocmplBell = 0
 			input = append(input, b)
 			clearLine()
 			drawPrompt()
@@ -202,8 +198,9 @@ func stripLeft(s []byte) []byte {
 }
 
 func searchPath(prefix string) []string {
-	// if file is a path
+	// TODO: if file is a path
 	// TODO: fix with the idea that `file` is incomplete
+
 	// if strings.Contains(prefix, "/") {
 	// 	err := isExec(prefix)
 	// 	if err == nil {
@@ -230,17 +227,12 @@ func searchPath(prefix string) []string {
 		for _, e := range entry {
 			// TODO: use binary search
 			if strings.HasPrefix(e.Name(), prefix) {
-				// fmt.Printf("entry: %s\r\n", e.Name())
 
 				execPath := filepath.Join(dir, e.Name())
 				if err := isExec(execPath); err == nil {
-					// if strings.HasPrefix(prefix, "x") {
-					// 	fmt.Printf("%c", '\a')
-					// 	return "", false
-					// }
-					bins = append(bins, e.Name())
-					// } else {
-					// 	panic(err)
+					if !slices.Contains(bins, e.Name()) {
+						bins = append(bins, e.Name())
+					}
 				}
 			}
 		}
