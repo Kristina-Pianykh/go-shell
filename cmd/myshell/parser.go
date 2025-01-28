@@ -64,12 +64,18 @@ func (p *Parser) parse(input string) (*[]string, error) {
 		ch := inputLeftTrimmed[i]
 		switch ch {
 		case '\\':
+
 			if !p.doubleQuoted && !p.singleQuoted && i+1 < len(inputLeftTrimmed) {
 				arg = append(arg, inputLeftTrimmed[i+1])
 				i = i + 2
 			} else if p.doubleQuoted && !p.singleQuoted {
-				arg = append(arg, ch)
-				i++
+				if i+1 < len(inputLeftTrimmed) && inputLeftTrimmed[i+1] == '$' || inputLeftTrimmed[i+1] == '`' || inputLeftTrimmed[i+1] == '"' || inputLeftTrimmed[i+1] == '\\' {
+					arg = append(arg, inputLeftTrimmed[i+1])
+					i = i + 2
+				} else {
+					arg = append(arg, ch)
+					i++
+				}
 			} else if !p.doubleQuoted && p.singleQuoted {
 				arg = append(arg, ch)
 				i++
