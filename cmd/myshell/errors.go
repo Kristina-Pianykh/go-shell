@@ -3,11 +3,12 @@ package main
 import "fmt"
 
 var (
-	UnknownOperatorErr   = NewUnknownOperatorError()
-	UnclosedQuoteErr     = NewUnclosedQuoteError()
-	UnexpectedNewLineErr = NewUnexpectedNewLineError()
-	ExitErr              = NewExitError()
-	SignalInterruptErr   = NewSignalInterruptError()
+	UnknownOperatorErr = NewUnknownOperatorError()
+	UnclosedQuoteErr   = NewUnclosedQuoteError()
+	// UnexpectedNewLineErr = NewUnexpectedTokenError()
+	PipeHasNoTargetErr = NewPipeHasNoTargetError()
+	ExitErr            = NewExitError()
+	SignalInterruptErr = NewSignalInterruptError()
 )
 
 type SignalInterruptError struct{}
@@ -50,13 +51,24 @@ func NewUnclosedQuoteError() error {
 	return &unclosedQuoteError{}
 }
 
-type unexpectedNewLine struct {
+type pipeHasNoTargetError struct{}
+
+func (e *pipeHasNoTargetError) Error() string {
+	return fmt.Sprintf("Pipe has no target")
 }
 
-func (e *unexpectedNewLine) Error() string {
-	return fmt.Sprintf("Unexpected 'newline'")
+func NewPipeHasNoTargetError() error {
+	return &pipeHasNoTargetError{}
 }
 
-func NewUnexpectedNewLineError() error {
-	return &unexpectedNewLine{}
+type unexpectedToken struct {
+	token string
+}
+
+func (e *unexpectedToken) Error() string {
+	return fmt.Sprintf("Unexpected token `%s`", e.token)
+}
+
+func NewUnexpectedTokenError(t string) error {
+	return &unexpectedToken{t}
 }

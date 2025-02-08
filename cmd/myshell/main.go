@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"os/signal"
 )
 
-const prompt = "$ "
+const regularPrompt = "$ "
+const awaitPrompt = "> "
 
 func main() {
 	signalC := make(chan os.Signal, 1)
@@ -43,7 +46,7 @@ func cmdLifecycle(ctx context.Context) error {
 		}
 	}()
 
-	fmt.Fprint(os.Stdout, prompt)
+	fmt.Fprint(os.Stdout, regularPrompt)
 	os.Stdout.Sync()
 	go parseInput(tokenCh)
 
@@ -86,4 +89,41 @@ func cmdLifecycle(ctx context.Context) error {
 		cmd.exec(ctx)
 	}
 	return nil
+}
+
+func rec(cmds [][]string, idx int, out *io.ReadCloser, prevCmd *exec.Cmd) {
+	var stdout io.ReadCloser
+	var err error
+
+	if idx == len(cmds) {
+		if prevCmd != nil {
+			prevCmd.Wait()
+		}
+		return
+	}
+
+	fmt.Printf("command: %v\n", cmds[idx])
+	cmd := exec.Command(cmds[idx][0], cmds[idx][1:]...)
+
+	if out != nil {
+		cmd.Stdin = *out
+	}
+
+	if idx == len(cmds)-1 {
+		cmd.Stdout = os.Stdout
+	} else {
+		stdout, err = cmd.StdoutPipe()
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	if err := cmd.Start(); err != nil {
+		panic(err)
+	}
+
+	if prevCmd != nil {
+		prevCmd.Wait()
+	}
+	rec(cmds, idx+1, &stdout, cmd)
 }

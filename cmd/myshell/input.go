@@ -27,10 +27,10 @@ func ringBell() {
 	os.Stdout.Write([]byte{'\a'})
 }
 
-func handleRegularKeyPress(input []byte, key byte) []byte {
+func handleRegularKeyPress(input []byte, key byte, prompt string) []byte {
 	updatedInput := append(input, key)
 	clearLine()
-	drawPrompt()
+	drawPrompt(prompt)
 	fmt.Printf("%s", updatedInput)
 	return updatedInput
 }
@@ -58,7 +58,7 @@ func handleTab(input []byte, bellCnt int) ([]byte, int) {
 		updatedInput = []byte(matches[0])
 		updatedInput = append(updatedInput, ' ')
 		clearLine()
-		drawPrompt()
+		drawPrompt(regularPrompt)
 		fmt.Fprintf(os.Stdout, "%s", updatedInput)
 		return updatedInput, bellCnt
 	}
@@ -72,7 +72,7 @@ func handleTab(input []byte, bellCnt int) ([]byte, int) {
 
 	case len(matches) == 1:
 		clearLine()
-		drawPrompt()
+		drawPrompt(regularPrompt)
 		updatedInput = cmplInput(input, matches[0])
 		updatedInput := append(updatedInput, ' ')
 		fmt.Fprintf(os.Stdout, "%s", updatedInput)
@@ -84,7 +84,7 @@ func handleTab(input []byte, bellCnt int) ([]byte, int) {
 		if len(commonPrefix) > len(trimmedInput) {
 			updatedInput = cmplInput(input, commonPrefix)
 			clearLine()
-			drawPrompt()
+			drawPrompt(regularPrompt)
 			fmt.Fprintf(os.Stdout, "%s", updatedInput)
 			return updatedInput, bellCnt
 		} else if commonPrefix == string(trimmedInput) {
@@ -100,7 +100,7 @@ func handleTab(input []byte, bellCnt int) ([]byte, int) {
 			}
 
 			fmt.Fprint(os.Stdout, "\r\n")
-			drawPrompt()
+			drawPrompt(regularPrompt)
 			fmt.Fprintf(os.Stdout, "%s", input)
 			return input, bellCnt
 		}
@@ -253,12 +253,12 @@ func clearLine() {
 	fmt.Print("\x1b[2K\r")
 }
 
-func drawPrompt() {
+func drawPrompt(prompt string) {
 	fmt.Fprint(os.Stdout, prompt)
 }
 
 // TODO: don't allow cursor moves outside of input buffer boundary
-func readInput(inputCh chan string) {
+func readInput(inputCh chan string, prompt string) {
 	var err error
 
 	// logFile, err := os.OpenFile("keylog.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -309,7 +309,7 @@ func readInput(inputCh chan string) {
 			continue
 		default:
 			bellCnt = 0
-			input = handleRegularKeyPress(input, b)
+			input = handleRegularKeyPress(input, b, prompt)
 		}
 	}
 }
@@ -331,18 +331,22 @@ func parseInput(
 			panic(err)
 		}
 	}()
+	prompt := regularPrompt
 
 Loop:
 	inputCh := make(chan string)
-	go readInput(inputCh)
+	go readInput(inputCh, prompt)
 	select {
 	case input, ok := <-inputCh:
 		if !ok || len(input) == 0 {
 			return
 		}
 		tokens, err := parser.parse(input)
-		if err != nil && errors.Is(err, UnclosedQuoteErr) {
-			drawPrompt()
+		// fmt.Printf("parser state: %s\n", parser.state())
+		// fmt.Printf("tokens: %v; len: %d\n", tokens, len(tokens))
+		if err != nil && (errors.Is(err, UnclosedQuoteErr) || errors.Is(err, PipeHasNoTargetErr)) {
+			prompt = awaitPrompt
+			drawPrompt(awaitPrompt)
 			goto Loop
 		}
 
@@ -350,7 +354,30 @@ Loop:
 			return
 		}
 
+		cmds := splitAtPipe(tokens)
+		fmt.Printf("cmds: %v\n", cmds)
 		tokenCh <- tokens
 		return
 	}
+}
+
+func splitAtPipe(tokens []string) [][]string {
+	cmds := make([][]string, 0, 10)
+	idx := 0
+
+	for _, tok := range tokens {
+
+		if tok == "|" {
+			idx++
+			continue
+		}
+
+		if len(cmds) < idx+1 {
+			cmds = append(cmds, []string{})
+		}
+
+		cmds[idx] = append(cmds[idx], tok)
+
+	}
+	return cmds
 }

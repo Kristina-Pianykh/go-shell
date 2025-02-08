@@ -7,37 +7,62 @@ import (
 )
 
 type Parser struct {
-	currentInput *string
 	buffer       *string
 	tokens       *[]string
 	singleQuoted bool
 	doubleQuoted bool
+	pipeComplete bool
 }
 
 func newParser() *Parser {
 	return &Parser{
-		currentInput: nil,
 		tokens:       nil,
 		singleQuoted: false,
 		doubleQuoted: false,
+		pipeComplete: true,
 	}
+}
+
+func (p *Parser) state() string {
+	tokens := []string{}
+
+	if p.tokens != nil {
+		tokens = *p.tokens
+	}
+	return fmt.Sprintf("tokens: %v, singleQuoted: %v, doubleQuoted: %v, pipeComplete: %v", tokens, p.singleQuoted, p.doubleQuoted, p.pipeComplete)
 }
 
 func (p *Parser) parse(input string) ([]string, error) {
 	if p.tokens == nil {
 		p.tokens = &[]string{}
 	}
-	inputLeftTrimmed := strings.TrimLeft(input, " \n\t")
-
 	arg := []byte{}
 
 	i := 0
 	for {
-		if i == len(inputLeftTrimmed) {
+		if i == len(input) {
 			break
 		}
-		ch := inputLeftTrimmed[i]
+		ch := input[i]
+		// fmt.Printf("ch: %d\n", ch)
 		switch ch {
+		case '|':
+
+			if len(*p.tokens) == 0 && len(arg) == 0 {
+				return nil, NewUnexpectedTokenError("|")
+			}
+
+			if len(arg) > 0 {
+				*p.tokens = append(*p.tokens, string(arg))
+				arg = arg[:0]
+			}
+
+			*p.tokens = append(*p.tokens, "|")
+			p.pipeComplete = false
+			i++
+			// fmt.Printf("arg: %s\n", arg)
+			// fmt.Printf("tokens: %v\n", *p.tokens)
+
 		case '>':
 			// 2454>
 			// 2454>|
@@ -50,18 +75,18 @@ func (p *Parser) parse(input string) ([]string, error) {
 					arg = arg[:0]
 				}
 
-				if i+1 < len(inputLeftTrimmed) { // should always be the case cause inputs ends with '\n' but just to be sure
+				if i+1 < len(input) { // should always be the case cause inputs ends with '\n' but just to be sure
 
 					// FIXME: handle invalid syntax errors like '>>>' or '>>!' (what to do in last case?)
 
 					var j int // next char after the op '>[|]' or '>>'
-					if inputLeftTrimmed[i+1] == '|' {
+					if input[i+1] == '|' {
 						*p.tokens = append(*p.tokens, ">|")
 						j = i + 2
 						i = i + 2
 
 						// FIXME: can pipe follow '>>': '>>[|]'?
-					} else if inputLeftTrimmed[i+1] == '>' {
+					} else if input[i+1] == '>' {
 						*p.tokens = append(*p.tokens, ">>")
 						j = i + 2
 						i = i + 2
@@ -73,13 +98,13 @@ func (p *Parser) parse(input string) ([]string, error) {
 
 					// check that '>[|]' is followed by something and doesn't end with '\n'
 					foundNonWhiteSpaceCh := false
-					for ; j < len(inputLeftTrimmed); j++ {
+					for ; j < len(input); j++ {
 						if j != ' ' && j != '\t' && j != '\n' {
 							foundNonWhiteSpaceCh = true
 						}
 					}
 					if !foundNonWhiteSpaceCh {
-						return nil, UnexpectedNewLineErr
+						return nil, NewUnexpectedTokenError("newline")
 					}
 				}
 
@@ -90,12 +115,12 @@ func (p *Parser) parse(input string) ([]string, error) {
 
 		case '\\':
 
-			if !p.doubleQuoted && !p.singleQuoted && i+1 < len(inputLeftTrimmed) {
-				arg = append(arg, inputLeftTrimmed[i+1])
+			if !p.doubleQuoted && !p.singleQuoted && i+1 < len(input) {
+				arg = append(arg, input[i+1])
 				i = i + 2
 			} else if p.doubleQuoted && !p.singleQuoted {
-				if i+1 < len(inputLeftTrimmed) && inputLeftTrimmed[i+1] == '$' || inputLeftTrimmed[i+1] == '`' || inputLeftTrimmed[i+1] == '"' || inputLeftTrimmed[i+1] == '\\' {
-					arg = append(arg, inputLeftTrimmed[i+1])
+				if i+1 < len(input) && input[i+1] == '$' || input[i+1] == '`' || input[i+1] == '"' || input[i+1] == '\\' {
+					arg = append(arg, input[i+1])
 					i = i + 2
 				} else {
 					arg = append(arg, ch)
@@ -105,7 +130,7 @@ func (p *Parser) parse(input string) ([]string, error) {
 				arg = append(arg, ch)
 				i++
 			}
-			continue
+
 		case '\'':
 
 			if p.doubleQuoted && !p.singleQuoted {
@@ -116,7 +141,6 @@ func (p *Parser) parse(input string) ([]string, error) {
 				p.singleQuoted = true
 			}
 			i++
-			continue
 
 		case '"':
 
@@ -128,7 +152,6 @@ func (p *Parser) parse(input string) ([]string, error) {
 				p.doubleQuoted = true
 			}
 			i++
-			continue
 
 		case ' ', '\t':
 
@@ -141,9 +164,8 @@ func (p *Parser) parse(input string) ([]string, error) {
 				arg = arg[:0]
 			}
 			i++
-			continue
 
-		case '\n':
+		case '\n', '\r':
 
 			if p.singleQuoted || p.doubleQuoted {
 				// prompt user for more input: incomplete/invalid echo command!
@@ -152,7 +174,7 @@ func (p *Parser) parse(input string) ([]string, error) {
 				arg = arg[:0]
 				tmp := strings.Join(*p.tokens, " ")
 				p.buffer = &tmp
-				return nil, NewUnclosedQuoteError()
+				return nil, UnclosedQuoteErr
 
 			} else if !p.singleQuoted && !p.doubleQuoted {
 				// we are done
@@ -162,9 +184,17 @@ func (p *Parser) parse(input string) ([]string, error) {
 				}
 				arg = arg[:0]
 			}
+
+			if !p.pipeComplete {
+				return nil, PipeHasNoTargetErr
+			}
+
 			i++
 
 		default:
+			if !p.pipeComplete {
+				p.pipeComplete = true
+			}
 			arg = append(arg, ch)
 			i++
 		}
