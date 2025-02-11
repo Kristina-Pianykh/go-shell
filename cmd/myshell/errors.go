@@ -72,3 +72,15 @@ func (e *unexpectedToken) Error() string {
 func NewUnexpectedTokenError(t string) error {
 	return &unexpectedToken{t}
 }
+
+type notFoundError struct {
+	s string
+}
+
+func (e *notFoundError) Error() string {
+	return notFound(e.s)
+}
+
+func NewNotFoundError(s string) error {
+	return &notFoundError{s}
+}

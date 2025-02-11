@@ -4,10 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"io/fs"
 	"os"
-	"os/exec"
 	"os/signal"
 )
 
@@ -34,15 +31,15 @@ func main() {
 
 func cmdLifecycle(ctx context.Context) error {
 	var (
-		cmd    *Cmd
+		shell  *Shell
 		tokens []string
 		ok     bool
 	)
 	tokenCh := make(chan []string)
 
 	defer func() {
-		if cmd != nil {
-			cmd.closeFds()
+		if shell != nil {
+			shell.closeFds()
 		}
 	}()
 
@@ -58,72 +55,47 @@ func cmdLifecycle(ctx context.Context) error {
 		}
 	}
 
-	cmd, err := NewCmd(tokens)
+	cmds := splitAtPipe(tokens)
+	shell, err := NewShell(cmds, ctx)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrExist) || errors.Is(err, UnknownOperatorErr) {
-			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-			return err
-		}
+		// if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrExist) || errors.Is(err, UnknownOperatorErr) || errors.Is(err, notFoundError) {
+		// 	fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+		// 	return err
+		// }
 		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
-		return errors.New(fmt.Sprintf("Error initializing *Cmd: %s\n", err.Error()))
+		return err
+		// return errors.New(fmt.Sprintf("Error initializing *Shell: %s\n", err.Error()))
 	}
-
 	switch {
-	case cmd.command == nil:
-		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.argv[0]))
-	case *cmd.command == EXIT:
-		// TODO: call original binary instead of doing builtin
-		// graceful shutdown with cancel context instead of killing with no defers run
-		if err := cmd.exit(); err == nil {
-			return ExitErr
-		}
-	case *cmd.command == ECHO:
-		cmd.echo()
-	case *cmd.command == TYPE:
-		cmd.typeCommand()
-	case *cmd.command == PWD:
-		cmd.pwd()
-	case *cmd.command == CD:
-		cmd.cd()
-	case cmd.command != nil && cmd.commandPath != nil:
-		cmd.exec(ctx)
+	case shell.builtin != nil:
+		return shell.runBuiltin()
+	case shell.cmds != nil:
+		err := shell.execute(ctx, 0, nil, nil)
+		// if err != nil {
+		// 	fmt.Fprint(os.Stderr, err.Error())
+		// }
+		return err
 	}
+
+	// switch {
+	// case shell.command == nil:
+	// 	fmt.Fprintf(shell.fds[STDERR], notFound(shell.argv[0]))
+	// case *shell.command == EXIT:
+	// 	// TODO: call original binary instead of doing builtin
+	// 	// graceful shutdown with cancel context instead of killing with no defers run
+	// 	if err := shell.exit(); err == nil {
+	// 		return ExitErr
+	// 	}
+	// case *shell.command == ECHO:
+	// 	shell.echo()
+	// case *shell.command == TYPE:
+	// 	shell.typeCommand()
+	// case *shell.command == PWD:
+	// 	shell.pwd()
+	// case *shell.command == CD:
+	// 	shell.cd()
+	// case shell.command != nil && shell.commandPath != nil:
+	// 	shell.exec(ctx)
+	// }
 	return nil
-}
-
-func rec(cmds [][]string, idx int, out *io.ReadCloser, prevCmd *exec.Cmd) {
-	var stdout io.ReadCloser
-	var err error
-
-	if idx == len(cmds) {
-		if prevCmd != nil {
-			prevCmd.Wait()
-		}
-		return
-	}
-
-	fmt.Printf("command: %v\n", cmds[idx])
-	cmd := exec.Command(cmds[idx][0], cmds[idx][1:]...)
-
-	if out != nil {
-		cmd.Stdin = *out
-	}
-
-	if idx == len(cmds)-1 {
-		cmd.Stdout = os.Stdout
-	} else {
-		stdout, err = cmd.StdoutPipe()
-		if err != nil {
-			panic(err)
-		}
-	}
-
-	if err := cmd.Start(); err != nil {
-		panic(err)
-	}
-
-	if prevCmd != nil {
-		prevCmd.Wait()
-	}
-	rec(cmds, idx+1, &stdout, cmd)
 }

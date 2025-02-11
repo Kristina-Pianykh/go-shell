@@ -354,8 +354,6 @@ Loop:
 			return
 		}
 
-		cmds := splitAtPipe(tokens)
-		fmt.Printf("cmds: %v\n", cmds)
 		tokenCh <- tokens
 		return
 	}
