@@ -32,10 +32,10 @@ func main() {
 func cmdLifecycle(ctx context.Context) error {
 	var (
 		shell  *Shell
-		tokens []string
+		tokens []token
 		ok     bool
 	)
-	tokenCh := make(chan []string)
+	tokenCh := make(chan []token)
 
 	defer func() {
 		if shell != nil {

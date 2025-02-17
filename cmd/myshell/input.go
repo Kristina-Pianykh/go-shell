@@ -315,7 +315,7 @@ func readInput(inputCh chan string, prompt string) {
 }
 
 func parseInput(
-	tokenCh chan []string,
+	tokenCh chan []token,
 ) {
 	parser := newParser()
 
@@ -354,26 +354,32 @@ Loop:
 			return
 		}
 
+		// for _, token := range tokens {
+		//     if !token.isValid(token) {
+		//       fmt.Fprintf(os.Stderr, "Failed to ")
+		//     }
+		//   }
 		tokenCh <- tokens
 		return
 	}
 }
 
-func splitAtPipe(tokens []string) [][]string {
-	cmds := make([][]string, 0, 10)
-	idx := 0
+func (t token) isValid() bool {
+	if (t.tok != nil && t.redirectOp != nil) || (t.tok == nil && t.redirectOp == nil) {
+		return false
+	}
+	return true
+}
+
+func splitAtPipe(tokens []token) [][]token {
+	cmds := [][]token{}
 
 	for _, tok := range tokens {
-
-		if tok == "|" {
-			idx++
+		if tok.tok != nil && *tok.tok == "|" {
 			continue
 		}
-
-		if len(cmds) < idx+1 {
-			cmds = append(cmds, []string{})
-		}
-
+		cmds = append(cmds, []token{})
+		idx := len(cmds) - 1
 		cmds[idx] = append(cmds[idx], tok)
 
 	}

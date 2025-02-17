@@ -19,7 +19,7 @@ type Shell struct {
 	// argc        int
 	// command     *string
 	// commandPath *string
-	cmds    [][]string
+	cmds    [][]token
 	builtin []string
 	fds     map[int]*os.File
 }
@@ -172,7 +172,7 @@ func (shell *Shell) runBuiltin() error {
 	return nil
 }
 
-func (shell *Shell) parseCmds(cmds [][]string, ctx context.Context) ([][]string, error) {
+func (shell *Shell) parseCmds(cmds [][]string, ctx context.Context) ([][]token, error) {
 	// 1. check path if exists
 	// 2. set redirections if applicable
 	// redirectionOps := []string{">", ">|", ">>"}
@@ -473,7 +473,7 @@ func (shell *Shell) cd() {
 	}
 }
 
-func initCmd(ctx context.Context, tokens []string) (*exec.Cmd, error) {
+func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 	argv := []string{}
 	var fd = STDOUT
 	var err error
