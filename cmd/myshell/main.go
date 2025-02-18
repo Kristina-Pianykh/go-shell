@@ -56,6 +56,11 @@ func cmdLifecycle(ctx context.Context) error {
 	}
 
 	cmds := splitAtPipe(tokens)
+	// for _, cmd := range cmds {
+	// 	for _, tok := range cmd {
+	// 		fmt.Printf("tok: %s\n", tok.string())
+	// 	}
+	// }
 	shell, err := NewShell(cmds, ctx)
 	if err != nil {
 		// if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrExist) || errors.Is(err, UnknownOperatorErr) || errors.Is(err, notFoundError) {

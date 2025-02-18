@@ -342,6 +342,9 @@ Loop:
 			return
 		}
 		tokens, err := parser.parse(input)
+		// for _, tok := range tokens {
+		// 	fmt.Printf("%s\n", tok.string())
+		// }
 		// fmt.Printf("parser state: %s\n", parser.state())
 		// fmt.Printf("tokens: %v; len: %d\n", tokens, len(tokens))
 		if err != nil && (errors.Is(err, UnclosedQuoteErr) || errors.Is(err, PipeHasNoTargetErr)) {
@@ -372,16 +375,16 @@ func (t token) isValid() bool {
 }
 
 func splitAtPipe(tokens []token) [][]token {
-	cmds := [][]token{}
+	cmds := make([][]token, 1)
+	idx := 0
 
 	for _, tok := range tokens {
 		if tok.tok != nil && *tok.tok == "|" {
+			cmds = append(cmds, []token{})
+			idx++
 			continue
 		}
-		cmds = append(cmds, []token{})
-		idx := len(cmds) - 1
 		cmds[idx] = append(cmds[idx], tok)
-
 	}
 	return cmds
 }

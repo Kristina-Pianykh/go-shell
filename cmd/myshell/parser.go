@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -26,14 +25,39 @@ type token struct {
 	redirectOp *redirectOp
 }
 
-// FIXME: change input arg to generic ([]byte | string | redirectOp struct type)
-func newToken(arg []byte) (*token, error) {
-	tok := string(arg)
-	token := token{tok: &tok}
-	if !token.isValid() {
-		return nil, errors.New(fmt.Sprintf("Validation failed for token: %s\n", token.string()))
+func (t token) isSimpleTok() bool {
+	if !t.isValid() {
+		return false
 	}
-	return &token, nil
+	if t.tok != nil && t.redirectOp == nil {
+		return true
+	}
+	return false
+}
+
+func (t token) isRedirectOp() bool {
+	if !t.isValid() {
+		return false
+	}
+	if t.tok == nil && t.redirectOp != nil {
+		return true
+	}
+	return false
+}
+
+// FIXME: change input arg to generic ([]byte | string | redirectOp struct type)
+func newToken(s string) token {
+	return token{tok: &s}
+}
+
+func newRedirectOp(op string) token {
+	redirect := redirectOp{op: op, fd: STDOUT}
+	return token{redirectOp: &redirect}
+}
+
+func newRedirectOpWithFd(op string, fd int) token {
+	redirect := redirectOp{op: op, fd: fd}
+	return token{redirectOp: &redirect}
 }
 
 func (t token) string() string {
@@ -92,19 +116,13 @@ func (p *Parser) parse(input string) ([]token, error) {
 			}
 
 			if len(arg) > 0 {
-				token, err := newToken(arg)
-				if err != nil {
-					return nil, err
-				}
-				*p.tokens = append(*p.tokens, *token)
+				token := newToken(string(arg))
+				*p.tokens = append(*p.tokens, token)
 				arg = arg[:0]
 			}
 
-			token, err := newToken([]byte("|"))
-			if err != nil {
-				return nil, err
-			}
-			*p.tokens = append(*p.tokens, *token)
+			token := newToken(("|"))
+			*p.tokens = append(*p.tokens, token)
 			p.pipeComplete = false
 			i++
 			// fmt.Printf("arg: %s\n", arg)
@@ -117,17 +135,14 @@ func (p *Parser) parse(input string) ([]token, error) {
 			// >
 
 			if !p.doubleQuoted && !p.singleQuoted {
-				num, err := strconv.Atoi(truncateLeadingZeros(string(arg)))
 
-				if len(arg) > 0 && err == nil {
-					redirectTok := redirectOp{fd: num}
-					token := token{redirectOp: &redirectTok}
-					if !token.isValid() {
-						return nil, errors.New(fmt.Sprintf("Validation failed for token: %s\n", token.string()))
+				// var token token
+				fd := STDOUT
+				if len(arg) > 0 {
+					if num, err := strconv.Atoi(truncateLeadingZeros(string(arg))); err == nil {
+						fd = num
+						arg = arg[:0]
 					}
-
-					*p.tokens = append(*p.tokens, token)
-					arg = arg[:0]
 				}
 
 				if i+1 < len(input) { // should always be the case cause inputs ends with '\n' but just to be sure
@@ -136,29 +151,20 @@ func (p *Parser) parse(input string) ([]token, error) {
 
 					var j int // next char after the op '>[|]' or '>>'
 					if input[i+1] == '|' {
-						token, err := newToken([]byte(">|"))
-						if err != nil {
-							return nil, err
-						}
-						*p.tokens = append(*p.tokens, *token)
+						token := newRedirectOpWithFd(">|", fd)
+						*p.tokens = append(*p.tokens, token)
 						j = i + 2
 						i = i + 2
 
 						// FIXME: can pipe follow '>>': '>>[|]'?
 					} else if input[i+1] == '>' {
-						token, err := newToken([]byte(">>"))
-						if err != nil {
-							return nil, err
-						}
-						*p.tokens = append(*p.tokens, *token)
+						token := newRedirectOpWithFd(">>", fd)
+						*p.tokens = append(*p.tokens, token)
 						j = i + 2
 						i = i + 2
 					} else {
-						token, err := newToken([]byte(">"))
-						if err != nil {
-							return nil, err
-						}
-						*p.tokens = append(*p.tokens, *token)
+						token := newRedirectOpWithFd(">", fd)
+						*p.tokens = append(*p.tokens, token)
 						j = i + 1
 						i++
 					}
@@ -225,12 +231,10 @@ func (p *Parser) parse(input string) ([]token, error) {
 			if p.singleQuoted || p.doubleQuoted {
 				arg = append(arg, ch)
 			} else if !p.singleQuoted && !p.doubleQuoted {
+
 				if len(arg) > 0 {
-					token, err := newToken(arg)
-					if err != nil {
-						return nil, err
-					}
-					*p.tokens = append(*p.tokens, *token)
+					token := newToken(string(arg))
+					*p.tokens = append(*p.tokens, token)
 				}
 				arg = arg[:0]
 			}
@@ -241,11 +245,8 @@ func (p *Parser) parse(input string) ([]token, error) {
 			if p.singleQuoted || p.doubleQuoted {
 				// prompt user for more input: incomplete/invalid echo command!
 				arg = append(arg, ch)
-				token, err := newToken(arg)
-				if err != nil {
-					return nil, err
-				}
-				*p.tokens = append(*p.tokens, *token)
+				token := newToken(string(arg))
+				*p.tokens = append(*p.tokens, token)
 				arg = arg[:0]
 				return nil, UnclosedQuoteErr
 
@@ -253,11 +254,8 @@ func (p *Parser) parse(input string) ([]token, error) {
 				// we are done
 				// arg = append(arg, ch)
 				if len(arg) > 0 {
-					token, err := newToken(arg)
-					if err != nil {
-						return nil, err
-					}
-					*p.tokens = append(*p.tokens, *token)
+					token := newToken(string(arg))
+					*p.tokens = append(*p.tokens, token)
 				}
 				arg = arg[:0]
 			}
