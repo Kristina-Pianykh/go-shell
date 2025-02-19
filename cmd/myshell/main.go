@@ -75,7 +75,7 @@ func cmdLifecycle(ctx context.Context) error {
 	case shell.builtin != nil:
 		return shell.runBuiltin()
 	case shell.cmds != nil:
-		err := shell.executeCmds(ctx)
+		err := shell.executeCmds()
 		// if err != nil {
 		// 	fmt.Fprint(os.Stderr, err.Error())
 		// }

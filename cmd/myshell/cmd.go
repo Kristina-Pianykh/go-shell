@@ -18,7 +18,7 @@ type Shell struct {
 	// argc        int
 	// command     *string
 	// commandPath *string
-	cmds    [][]token
+	cmds    []*exec.Cmd
 	builtin []token
 	fds     map[int]*os.File
 }
@@ -46,7 +46,7 @@ func copy(s []string) []string {
 	return newS
 }
 
-func NewShell(cmds [][]token, ctx context.Context) (*Shell, error) {
+func NewShell(sets [][]token, ctx context.Context) (*Shell, error) {
 	shell := &Shell{
 		cmds:    nil,
 		builtin: nil,
@@ -58,20 +58,29 @@ func NewShell(cmds [][]token, ctx context.Context) (*Shell, error) {
 	}
 
 	// check if builtin
-	if len(cmds) == 1 {
-		cmd := cmds[0]
-		if token := *cmd[0].tok; isBuiltin(token) {
-			shell.builtin = cmd
+	if len(sets) == 1 {
+		set := sets[0]
+		if token := *set[0].tok; isBuiltin(token) {
+			shell.builtin = set
 			return shell, nil
 		}
 	}
 
 	// validate commands
-	if err := shell.validateCmds(cmds); err != nil {
+	if err := shell.validateCmds(sets); err != nil {
 		return nil, err
 	}
 
-	shell.cmds = cmds
+	execCmds := []*exec.Cmd{}
+	for _, tokenSet := range sets {
+		execCmd, err := initCmd(ctx, tokenSet)
+		if err != nil {
+			return nil, err
+		}
+		execCmds = append(execCmds, execCmd)
+	}
+
+	shell.cmds = execCmds
 	return shell, nil
 }
 
@@ -509,17 +518,12 @@ func executeCmd(
 	return nil, nextPw, nextPr
 }
 
-func (shell *Shell) executeCmds(ctx context.Context) error {
+func (shell *Shell) executeCmds() error {
 	var pw *io.PipeWriter
 	var pr io.Reader = nil
 	var prevCmd *exec.Cmd
 
-	for i, tokens := range (*shell).cmds {
-
-		cmd, err := initCmd(ctx, tokens)
-		if err != nil {
-			return err
-		}
+	for i, cmd := range (*shell).cmds {
 		// fmt.Printf("command: %v\n", cmd)
 
 		lastCmd := i+1 == len((*shell).cmds)
