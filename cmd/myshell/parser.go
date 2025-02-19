@@ -72,7 +72,7 @@ func (t token) string() string {
 	if t.redirectOp == nil {
 		redirectOp = "nil"
 	} else {
-		redirectOp = fmt.Sprintf("redirectOp{tok: %s, redirectOp: %d}", (*t.redirectOp).op, (*t.redirectOp).fd)
+		redirectOp = fmt.Sprintf("redirectOp{tok: %s, fd: %d}", (*t.redirectOp).op, (*t.redirectOp).fd)
 	}
 	return fmt.Sprintf("token{tok: %s, redirectOp: %s}", tokString, redirectOp)
 }

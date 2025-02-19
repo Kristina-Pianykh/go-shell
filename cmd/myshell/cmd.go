@@ -171,108 +171,8 @@ func (shell *Shell) validateCmds(cmds [][]token) error {
 		}
 	}
 
-	// argv := []string{}
-	// var fd = STDOUT
-	// var openFile *os.File
-	// var path string
-
-	// for _, op := range redirectionOps {
-	// 	if slices.Contains(tokens, op) {
-	//
-	// 		for i := 0; i < len(tokens); {
-	// 			arg := tokens[i]
-	//
-	// 			if v, err := strconv.Atoi(tokens[i]); err == nil && tokens[i+1] == op {
-	// 				fd = v
-	// 				i++
-	// 				continue
-	// 			}
-	//
-	// 			if arg == op {
-	// 				path = tokens[i+1]
-	// 				i = i + 2
-	// 				continue
-	// 			}
-	// 			argv = append(argv, arg)
-	// 			i++
-	// 		}
-	//
-	// 		openFile, err = redirectFd(fd, path, op) // ???????
-	// 		if err != nil {
-	// 			return nil, err
-	// 		}
-	// 		break // technically should be able process recursive derivatives of all ops
-	// 	}
-	// }
-
-	// 	var command *exec.Cmd
-	// 	if openFile == nil {
-	// 		argv = copy(tokens)
-	// 	}
-	// 	command = exec.CommandContext(ctx, argv[0], argv[1:]...)
-	//
-	// 	if openFile != nil { // no redirection
-	// 		switch fd {
-	// 		case STDIN:
-	// 			command.Stdin = openFile
-	// 		case STDOUT:
-	// 			command.Stdout = openFile
-	// 		case STDERR:
-	// 			command.Stderr = openFile
-	// 		default:
-	// 			command.ExtraFiles = append(command.ExtraFiles, openFile)
-	// 		}
-	// 	}
-	//
-	// 	commands = append(commands, command)
-	// }
-	// fmt.Printf("commands: %v\n", commands)
-	// return commands, nil
 	return nil
 }
-
-// func (shell *Shell) parse(cmds [][]string) ([]string, error) {
-// 	argv := []string{}
-//
-// 	var path string
-// 	var fd = STDOUT
-//
-// 	redirectionOps := []string{">", ">|", ">>"}
-//
-// 	for _, op := range redirectionOps {
-// 		if slices.Contains(tokens, op) {
-//
-// 			for i := 0; i < len(tokens); {
-// 				arg := tokens[i]
-//
-// 				if v, err := strconv.Atoi(tokens[i]); err == nil && tokens[i+1] == op {
-// 					fd = v
-// 					i++
-// 					continue
-// 				}
-//
-// 				if arg == op {
-// 					path = tokens[i+1]
-// 					i = i + 2
-// 					continue
-// 				}
-// 				argv = append(argv, arg)
-// 				i++
-// 			}
-//
-// 			err := shell.redirectFd(fd, path, op)
-// 			if err != nil {
-// 				return nil, err
-// 			}
-// 			break // technically should be able process recursive derivatives of all ops
-// 		}
-// 	}
-//
-// 	if len(argv) == 0 {
-// 		argv = copy(tokens)
-// 	}
-// 	return argv, nil
-// }
 
 func stringify(lst []token) string {
 	var sb strings.Builder
@@ -509,6 +409,7 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 		case token.isRedirectOp():
 			path = *tokens[i+1].tok
 			openFile, err = redirectFd(*token.redirectOp, path) // ???????
+			fd = token.redirectOp.fd
 			if err != nil {
 				// fmt.Printf(err.Error())
 				return nil, err
@@ -525,7 +426,7 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 
-	if len(path) > 0 { // no redirection
+	if openFile != nil {
 		switch fd {
 		case STDIN:
 			cmd.Stdin = openFile
@@ -540,69 +441,104 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 	return cmd, nil
 }
 
-func (shell *Shell) execute(ctx context.Context, idx int, out *io.ReadCloser, prevCmd *exec.Cmd) error {
-	var stdout io.ReadCloser
-	var err error
+func executeCmd(
+	pr io.Reader,
+	pw *io.PipeWriter,
+	cmd *exec.Cmd,
+	prevCmd *exec.Cmd,
+	lastCmd bool,
+) (error, *io.PipeWriter, *io.PipeReader) {
 
-	if idx == len(shell.cmds) {
-		if prevCmd != nil {
-			if err := prevCmd.Wait(); err != nil {
-				return err
-			}
+	if cmd.Stdin == nil && pr != nil {
+		cmd.Stdin = pr
+	}
+
+	stdoutWriters := []io.Writer{}
+	stderrWriters := []io.Writer{}
+
+	var nextPw *io.PipeWriter = nil
+	var nextPr *io.PipeReader = nil
+	if !lastCmd {
+		nextPr, nextPw = io.Pipe()
+		stdoutWriters = append(stdoutWriters, nextPw)
+	}
+
+	stdoutRedirected := cmd.Stdout != nil
+	switch {
+	case !stdoutRedirected:
+		if lastCmd {
+			stdoutWriters = append(stdoutWriters, os.Stdout)
 		}
-		return nil
-	}
-
-	cmd, err := initCmd(ctx, (*shell).cmds[idx])
-	if err != nil {
-		return err
-	}
-
-	// fmt.Printf("command: %v\n", cmd)
-
-	if cmd.Stdin != nil {
-		// TODO: implement stdin redirection with `<`
-	} else if cmd.Stdin == nil && out != nil {
-		cmd.Stdin = *out
-	}
-
-	writers := []io.Writer{}
-	if cmd.Stdout != nil {
-		writers = append(writers, cmd.Stdout)
-		// write to file
-	}
-
-	if cmd.Stderr == nil {
-		cmd.Stderr = os.Stderr
+	case stdoutRedirected:
+		stdoutWriters = append(stdoutWriters, cmd.Stdout)
+		// if lastCmd {
+		// 	stdoutWriters = append(stdoutWriters, os.Stdout)
+		// }
 	}
 
 	for _, file := range cmd.ExtraFiles {
-		writers = append(writers, file)
+		stdoutWriters = append(stdoutWriters, file)
 	}
 
-	lastCmd := idx == len((*shell).cmds)-1
-	if lastCmd {
-		if cmd.Stdout == nil {
-			cmd.Stdout = os.Stdout
-		}
-	} else {
-		if len(writers) > 0 { // remove if condition?
-			cmd.Stdout = io.MultiWriter(writers...)
-		}
-
-		stdout, err = cmd.StdoutPipe()
-		if err != nil {
-			panic(err)
-		}
+	stderrRedirected := cmd.Stderr != nil
+	switch {
+	case stderrRedirected:
+		stderrWriters = append(stderrWriters, cmd.Stderr)
+	case !stderrRedirected:
+		stderrWriters = append(stderrWriters, os.Stderr)
 	}
+
+	cmd.Stdout = io.MultiWriter(stdoutWriters...)
+	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
 	if err := cmd.Start(); err != nil {
-		panic(err)
+		return err, nil, nil
 	}
 
-	// if prevCmd != nil {
-	// 	prevCmd.Wait()
-	// }
+	if prevCmd != nil {
+		if err := prevCmd.Wait(); err != nil {
+			return err, nil, nil
+		}
+		if pw != nil {
+			if err := pw.Close(); err != nil {
+				return err, nil, nil
+			}
+		}
+	}
 
-	return shell.execute(ctx, idx+1, &stdout, cmd)
+	return nil, nextPw, nextPr
+}
+
+func (shell *Shell) executeCmds(ctx context.Context) error {
+	var pw *io.PipeWriter
+	var pr io.Reader = nil
+	var prevCmd *exec.Cmd
+
+	for i, tokens := range (*shell).cmds {
+
+		cmd, err := initCmd(ctx, tokens)
+		if err != nil {
+			return err
+		}
+		// fmt.Printf("command: %v\n", cmd)
+
+		lastCmd := i+1 == len((*shell).cmds)
+		err, nextPw, nextPr := executeCmd(pr, pw, cmd, prevCmd, lastCmd)
+		if err != nil {
+			return err
+		}
+		pw = nextPw
+		pr = nextPr
+		prevCmd = cmd
+		// if v, ok := pr.(*io.PipeReader); ok && v != nil {
+		// 	io.Copy(os.Stdout, pr)
+		// }
+	}
+
+	if prevCmd != nil {
+		if err := prevCmd.Wait(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

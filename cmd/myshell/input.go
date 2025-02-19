@@ -357,11 +357,9 @@ Loop:
 			return
 		}
 
-		// for _, token := range tokens {
-		//     if !token.isValid(token) {
-		//       fmt.Fprintf(os.Stderr, "Failed to ")
-		//     }
-		//   }
+		// for i, token := range tokens {
+		// 	fmt.Printf("%d: %s\n", i, token.string())
+		// }
 		tokenCh <- tokens
 		return
 	}
