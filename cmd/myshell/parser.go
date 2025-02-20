@@ -2,14 +2,12 @@ package main
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 )
 
 type Parser struct {
-	tokens *[]token
-	// tokens       *[]string
+	tokens       *[]token
 	singleQuoted bool
 	doubleQuoted bool
 	pipeComplete bool
@@ -45,14 +43,8 @@ func (t token) isRedirectOp() bool {
 	return false
 }
 
-// FIXME: change input arg to generic ([]byte | string | redirectOp struct type)
 func newToken(s string) token {
 	return token{tok: &s}
-}
-
-func newRedirectOp(op string) token {
-	redirect := redirectOp{op: op, fd: STDOUT}
-	return token{redirectOp: &redirect}
 }
 
 func newRedirectOpWithFd(op string, fd int) token {
@@ -107,7 +99,6 @@ func (p *Parser) parse(input string) ([]token, error) {
 			break
 		}
 		ch := input[i]
-		// fmt.Printf("ch: %d\n", ch)
 		switch ch {
 		case '|':
 
@@ -125,8 +116,6 @@ func (p *Parser) parse(input string) ([]token, error) {
 			*p.tokens = append(*p.tokens, token)
 			p.pipeComplete = false
 			i++
-			// fmt.Printf("arg: %s\n", arg)
-			// fmt.Printf("tokens: %v\n", *p.tokens)
 
 		case '>':
 			// 2454>
@@ -136,7 +125,6 @@ func (p *Parser) parse(input string) ([]token, error) {
 
 			if !p.doubleQuoted && !p.singleQuoted {
 
-				// var token token
 				fd := STDOUT
 				if len(arg) > 0 {
 					if num, err := strconv.Atoi(truncateLeadingZeros(string(arg))); err == nil {
@@ -252,7 +240,6 @@ func (p *Parser) parse(input string) ([]token, error) {
 
 			} else if !p.singleQuoted && !p.doubleQuoted {
 				// we are done
-				// arg = append(arg, ch)
 				if len(arg) > 0 {
 					token := newToken(string(arg))
 					*p.tokens = append(*p.tokens, token)
@@ -275,9 +262,6 @@ func (p *Parser) parse(input string) ([]token, error) {
 		}
 	}
 
-	// for i, arg := range *p.tokens {
-	// 	fmt.Printf("arg #%d: %s\n", i, arg)
-	// }
 	return *p.tokens, nil
 }
 
@@ -299,27 +283,6 @@ func truncateLeadingZeros(s string) string {
 	return sb.String()
 }
 
-func isNumber(s string) bool {
-	s = trim(s)
-	leadingZero := true
-
-	if len(s) == 0 {
-		return false
-	}
-	for _, ch := range s {
-		// leading zeros are truncated
-		if len(s) > 1 && ch == '0' && leadingZero {
-			continue
-		}
-
-		if !('0' <= ch && ch <= '9') {
-			return false
-		}
-		leadingZero = false
-	}
-	return true
-}
-
 func notFound(input string) string {
 	input = removeNewLinesIfPresent(input)
 	return fmt.Sprintf("%s: not found\n", input)
@@ -330,26 +293,4 @@ func removeNewLinesIfPresent(s string) string {
 		return strings.TrimRight(s, "\n")
 	}
 	return s
-}
-
-func removeMultipleWhitespaces(s []byte) []byte {
-	multiSpace, err := regexp.Compile(" {2,}|\t+")
-	if err != nil {
-		panic(err)
-	}
-	return multiSpace.ReplaceAll(s, []byte{' '})
-}
-
-func addNewLineIfAbsent(s string) string {
-	if strings.HasSuffix(s, "\n") {
-		return s
-	}
-	var sb strings.Builder
-	sb.WriteString(s)
-	sb.WriteString("\n")
-	return sb.String()
-}
-
-func trim(v string) string {
-	return strings.TrimRight(strings.TrimLeft(v, " "), " ")
 }

@@ -22,6 +22,7 @@ const (
 	tab           = 9
 	bell          = 7
 )
+const MAX_INT = int((uint(1) << 63) - 1)
 
 func ringBell() {
 	os.Stdout.Write([]byte{'\a'})
@@ -147,8 +148,6 @@ func sharePrefix(lst []fs.DirEntry, prefix string) []string {
 	}
 	return entries
 }
-
-const MAX_INT = int((uint(1) << 63) - 1)
 
 func commonPrefix(lst []string) string {
 	maxPrefixLen := MAX_INT

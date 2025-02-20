@@ -5,7 +5,6 @@ import "fmt"
 var (
 	UnknownOperatorErr = NewUnknownOperatorError()
 	UnclosedQuoteErr   = NewUnclosedQuoteError()
-	// UnexpectedNewLineErr = NewUnexpectedTokenError()
 	PipeHasNoTargetErr = NewPipeHasNoTargetError()
 	ExitErr            = NewExitError()
 	SignalInterruptErr = NewSignalInterruptError()
