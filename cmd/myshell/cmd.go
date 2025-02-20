@@ -198,6 +198,7 @@ func (shell *Shell) echo() {
 	var path string
 	var err error
 	openFile := os.Stdout
+	fd := STDOUT
 
 	argv := []string{}
 	for i := 0; i < len(cmd); {
@@ -210,6 +211,7 @@ func (shell *Shell) echo() {
 			if err != nil {
 				return
 			}
+			fd = token.redirectOp.fd
 			i = i + 2
 		case token.isSimpleTok():
 			argv = append(argv, *token.tok)
@@ -226,7 +228,13 @@ func (shell *Shell) echo() {
 			sb.WriteString("\n")
 		}
 	}
-	fmt.Fprintf(openFile, sb.String())
+	switch fd {
+	case STDOUT:
+		fmt.Fprintf(openFile, sb.String())
+	case STDERR:
+		fmt.Fprintf(openFile, "")
+		fmt.Fprintf(os.Stdout, sb.String())
+	}
 }
 
 func (shell *Shell) exit() error {
