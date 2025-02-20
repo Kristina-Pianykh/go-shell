@@ -300,7 +300,7 @@ func (shell *Shell) cd() {
 	}
 
 	if err := os.Chdir(absPath); err != nil {
-		fmt.Fprintf(shell.fds[STDERR], "cd: %s: No such file or directory\n", absPath)
+		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
 		return
 	}
 
