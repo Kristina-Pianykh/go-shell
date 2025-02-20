@@ -443,8 +443,6 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 			cmd.Stdout = openFile
 		case STDERR:
 			cmd.Stderr = openFile
-		default:
-			cmd.ExtraFiles = append(cmd.ExtraFiles, openFile)
 		}
 	}
 	return cmd, nil
@@ -462,58 +460,49 @@ func executeCmd(
 		cmd.Stdin = pr
 	}
 
-	stdoutWriters := []io.Writer{}
-	stderrWriters := []io.Writer{}
-
 	var nextPw *io.PipeWriter = nil
 	var nextPr *io.PipeReader = nil
 	if !lastCmd {
 		nextPr, nextPw = io.Pipe()
-		stdoutWriters = append(stdoutWriters, nextPw)
-	}
-
-	stdoutRedirected := cmd.Stdout != nil
-	switch {
-	case !stdoutRedirected:
-		if lastCmd {
-			stdoutWriters = append(stdoutWriters, os.Stdout)
+		if cmd.Stdout == nil {
+			cmd.Stdout = nextPw
 		}
-	case stdoutRedirected:
-		stdoutWriters = append(stdoutWriters, cmd.Stdout)
-		// if lastCmd {
-		// 	stdoutWriters = append(stdoutWriters, os.Stdout)
-		// }
+	} else {
+		if cmd.Stdout == nil {
+			cmd.Stdout = os.Stdout
+		}
 	}
 
-	for _, file := range cmd.ExtraFiles {
-		stdoutWriters = append(stdoutWriters, file)
+	if cmd.Stderr == nil {
+		cmd.Stderr = os.Stderr
 	}
-
-	stderrRedirected := cmd.Stderr != nil
-	switch {
-	case stderrRedirected:
-		stderrWriters = append(stderrWriters, cmd.Stderr)
-	case !stderrRedirected:
-		stderrWriters = append(stderrWriters, os.Stderr)
-	}
-
-	cmd.Stdout = io.MultiWriter(stdoutWriters...)
-	cmd.Stderr = io.MultiWriter(stderrWriters...)
 
 	if err := cmd.Start(); err != nil {
 		return err, nil, nil
 	}
 
 	if prevCmd != nil {
-		if err := prevCmd.Wait(); err != nil {
-			return err, nil, nil
-		}
-		if pw != nil {
-			if err := pw.Close(); err != nil {
-				return err, nil, nil
+		go func() {
+			// TODO: lift errors
+			prevCmd.Wait()
+			if pw != nil {
+				pw.Close()
+			}
+		}()
+	}
+
+	defer func() {
+		if cmd.Stdout != os.Stdout {
+			if file, ok := cmd.Stdout.(*os.File); ok {
+				file.Close()
 			}
 		}
-	}
+		if cmd.Stderr != os.Stderr {
+			if file, ok := cmd.Stderr.(*os.File); ok {
+				file.Close()
+			}
+		}
+	}()
 
 	return nil, nextPw, nextPr
 }
@@ -524,8 +513,6 @@ func (shell *Shell) executeCmds() error {
 	var prevCmd *exec.Cmd
 
 	for i, cmd := range (*shell).cmds {
-		// fmt.Printf("command: %v\n", cmd)
-
 		lastCmd := i+1 == len((*shell).cmds)
 		err, nextPw, nextPr := executeCmd(pr, pw, cmd, prevCmd, lastCmd)
 		if err != nil {
@@ -534,9 +521,6 @@ func (shell *Shell) executeCmds() error {
 		pw = nextPw
 		pr = nextPr
 		prevCmd = cmd
-		// if v, ok := pr.(*io.PipeReader); ok && v != nil {
-		// 	io.Copy(os.Stdout, pr)
-		// }
 	}
 
 	if prevCmd != nil {
