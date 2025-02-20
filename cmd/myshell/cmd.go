@@ -4,102 +4,83 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 )
 
-type Cmd struct {
-	argv        []string
-	argc        int
-	command     *string
-	commandPath *string
-	fds         map[int]*os.File
-}
-
-const STDIN = 0
-const STDOUT = 1
-const STDERR = 2
-
-const EXIT = "exit"
-const ECHO = "echo"
-const TYPE = "type"
-const PWD = "pwd"
-const CD = "cd"
-
-var (
-	builtins [5]string       = [5]string{EXIT, ECHO, TYPE, PWD, CD}
-	fds      map[int]os.File = map[int]os.File{STDIN: *os.Stdin, STDOUT: *os.Stdout, STDERR: *os.Stderr}
+const (
+	STDIN  = 0
+	STDOUT = 1
+	STDERR = 2
 )
 
-func copy(s []string) []string {
-	newS := []string{}
-	for i := range s {
-		newS = append(newS, s[i])
-	}
-	return newS
+const (
+	EXIT = "exit"
+	ECHO = "echo"
+	TYPE = "type"
+	PWD  = "pwd"
+	CD   = "cd"
+)
+
+var builtins [5]string = [5]string{EXIT, ECHO, TYPE, PWD, CD}
+
+type Shell struct {
+	cmds    []*exec.Cmd
+	builtin []token
 }
 
-func NewCmd(tokens []string) (*Cmd, error) {
-	cmd := &Cmd{
-		argv:        nil,
-		argc:        0,
-		command:     nil,
-		commandPath: nil,
-	}
-	cmd.fds = map[int]*os.File{}
-	for k := range fds {
-		v := fds[k]
-		cmd.fds[k] = &v
+func NewShell(sets [][]token, ctx context.Context) (*Shell, error) {
+	shell := &Shell{
+		cmds:    nil,
+		builtin: nil,
 	}
 
-	argv, err := cmd.parse(tokens)
-	if err != nil {
+	// check if builtin
+	if len(sets) == 1 {
+		set := sets[0]
+		if token := *set[0].tok; isBuiltin(token) {
+			shell.builtin = set
+			return shell, nil
+		}
+	}
+
+	// validate commands
+	if err := shell.validateCmds(sets); err != nil {
 		return nil, err
 	}
-	cmd.argv = argv
-	cmd.argc = len(cmd.argv)
-	cmd.setCommandAndPath()
-	return cmd, nil
+
+	execCmds := []*exec.Cmd{}
+	for _, tokenSet := range sets {
+		execCmd, err := initCmd(ctx, tokenSet)
+		if err != nil {
+			return nil, err
+		}
+		execCmds = append(execCmds, execCmd)
+	}
+
+	shell.cmds = execCmds
+	return shell, nil
 }
 
-func (cmd *Cmd) exec(ctx context.Context) {
-	cmdC := exec.CommandContext(ctx, *cmd.command, cmd.argv[1:]...)
-	// fmt.Printf("exec(); argv: %v; len(argv): %d\n", *cmd.argv, len(*cmd.argv))
-	var out strings.Builder
-	var stdErr strings.Builder
-	cmdC.Stdout = &out
-	cmdC.Stderr = &stdErr
-
-	err := cmdC.Run()
-
-	if out.Len() > 0 {
-		fmt.Fprintf(cmd.fds[STDOUT], "%s\n", removeNewLinesIfPresent(out.String()))
-	}
-	if err != nil {
-		fmt.Fprintf(cmd.fds[STDERR], "%s\n", removeNewLinesIfPresent(stdErr.String()))
-	}
-}
-
-func (cmd *Cmd) redirectFd(fd int, filePath, op string) error {
+func redirectFd(redirectToken redirectOp, filePath string) (*os.File, error) {
 	// TODO: do we validate the fd value?
-	switch op {
+	switch redirectToken.op {
 	case ">":
 		mkParentDirIfAbsent(filePath)
 		file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_EXCL|os.O_CREATE, 0644)
 		if errors.Is(err, os.ErrExist) {
-			// panic(err)
-			return err
+			return nil, err
 		}
 		if err != nil {
 			panic(err) // FIXME: any other relevant errors?
 		}
 
-		cmd.fds[fd] = file
+		return file, nil
 	case ">|":
 		mkParentDirIfAbsent(filePath)
 		file, err := os.OpenFile(filePath, os.O_RDWR|os.O_TRUNC|os.O_CREATE, 0644)
@@ -107,23 +88,22 @@ func (cmd *Cmd) redirectFd(fd int, filePath, op string) error {
 			panic(err) // FIXME: any relevant errors?
 		}
 
-		cmd.fds[fd] = file
+		return file, nil
 	case ">>":
 		file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintf(cmd.fds[STDOUT], "%s\n", err.Error())
-				return err
+				fmt.Fprintf(os.Stdout, "%s\n", err.Error())
+				return nil, err
 			} else {
 				panic(err) // FIXME: any relevant errors?
 			}
 		}
 
-		cmd.fds[fd] = file
+		return file, nil
 	default:
-		return UnknownOperatorErr
+		return nil, UnknownOperatorErr
 	}
-	return nil
 }
 
 func mkParentDirIfAbsent(path string) {
@@ -137,116 +117,69 @@ func mkParentDirIfAbsent(path string) {
 	}
 }
 
-func (cmd *Cmd) parse(tokens []string) ([]string, error) {
-	argv := []string{}
+func (shell *Shell) runBuiltin() error {
+	token := (*shell).builtin[0]
+	if token.tok == nil {
+		return errors.New(fmt.Sprintf("expected builtin, got %s", token.string()))
+	}
 
-	var path string
-	var fd = STDOUT
+	switch *token.tok {
+	case EXIT:
+		// TODO: call original binary instead of doing builtin
+		// graceful shutdown with cancel context instead of killing with no defers run
+		if err := shell.exit(); err == nil {
+			return ExitErr
+		}
+	case ECHO:
+		shell.echo()
+	case TYPE:
+		shell.typeCommand()
+	case PWD:
+		shell.pwd()
+	case CD:
+		shell.cd()
+	}
+	return nil
+}
 
-	redirectionOps := []string{">", ">|", ">>"}
+func (shell *Shell) validateCmds(cmds [][]token) error {
+	// 1. check path if exists
+	// 2. set redirections if applicable
+	// redirectionOps := []string{">", ">|", ">>"}
 
-	for _, op := range redirectionOps {
-		if slices.Contains(tokens, op) {
-
-			for i := 0; i < len(tokens); {
-				arg := tokens[i]
-
-				if v, err := strconv.Atoi(tokens[i]); err == nil && tokens[i+1] == op {
-					fd = v
-					i++
-					continue
-				}
-
-				if arg == op {
-					path = tokens[i+1]
-					i = i + 2
-					continue
-				}
-				argv = append(argv, arg)
-				i++
-			}
-
-			err := cmd.redirectFd(fd, path, op)
-			if err != nil {
-				return nil, err
-			}
-			break // technically should be able process recursive derivatives of all ops
+	for _, cmd := range cmds {
+		bin := cmd[0].tok
+		if bin == nil {
+			return errors.New(fmt.Sprintf("expected binary name, got %s", cmd[0].string()))
+		}
+		_, err := exec.LookPath(*bin)
+		if err != nil {
+			return err
 		}
 	}
 
-	if len(argv) == 0 {
-		argv = copy(tokens)
-	}
-	return argv, nil
+	return nil
 }
 
-func (cmd *Cmd) getArgv() string {
+func stringify(lst []token) string {
 	var sb strings.Builder
-	for i, arg := range cmd.argv {
-		sb.WriteString(arg)
-		if i < cmd.argc-1 {
+	for i, arg := range lst {
+
+		switch {
+		case arg.isSimpleTok():
+			sb.WriteString(*arg.tok)
+		case arg.isRedirectOp():
+			sb.WriteString(arg.redirectOp.op)
+		}
+
+		if i < len(lst)-1 {
 			sb.WriteString(" ")
 		}
 	}
 	return sb.String()
 }
 
-func (cmd *Cmd) closeFds() {
-	for i := range []int{STDIN, STDOUT, STDERR} {
-		// fmt.Printf("fd: %d\n", i)
-		v := fds[i]
-		stat1, err1 := (&v).Stat()
-		if err1 != nil {
-			panic(err1)
-		}
-		stat2, err2 := cmd.fds[i].Stat()
-		if err2 != nil {
-			panic(err2)
-		}
-		// fmt.Printf("stat1: %s\n", stat1.Name())
-		// fmt.Printf("stat2: %s\n", stat1.Name())
-		if !os.SameFile(stat1, stat2) {
-			err := cmd.fds[i].Close()
-			if err != nil {
-				panic(err)
-			}
-		}
-	}
-
-	for k := range fds {
-		v := fds[k]
-		cmd.fds[k] = &v
-	}
-
-	for k := range cmd.fds {
-		if k > 2 {
-			err := cmd.fds[k].Close()
-			if err != nil {
-				panic(err)
-			}
-			delete(cmd.fds, k)
-		}
-	}
-
-}
-
-func keys(dict map[int]*os.File) []int {
-	keys := []int{}
-	for k := range dict {
-		keys = append(keys, k)
-	}
-	return keys
-}
-
-func values(dict map[int]*os.File) []*os.File {
-	values := []*os.File{}
-	for k := range dict {
-		values = append(values, dict[k])
-	}
-	return values
-}
-
-func (cmd *Cmd) isBuiltin(str string) bool {
+func isBuiltin(str string) bool {
 	for _, c := range builtins {
 		if str == c {
 			return true
@@ -255,83 +188,100 @@ func (cmd *Cmd) isBuiltin(str string) bool {
 	return false
 }
 
-func (cmd *Cmd) setCommandAndPath() {
-	if cmd.argv == nil || len(cmd.argv) == 0 {
-		return
-	}
-	c := cmd.argv[0]
-	if builtin := cmd.isBuiltin(cmd.argv[0]); builtin {
-		cmd.command = &c
-		return
-	}
-	if path, err := exec.LookPath(c); err == nil {
-		cmd.command = &c
-		cmd.commandPath = &path
-	}
-}
-
-func (cmd *Cmd) echo() {
+func (shell *Shell) echo() {
+	cmd := shell.builtin
 	var sb strings.Builder
+	var path string
+	var err error
+	openFile := os.Stdout
 
-	for i := 1; i < cmd.argc; i++ {
-		sb.WriteString(cmd.argv[i])
-		if i < cmd.argc-1 {
+	argv := []string{}
+	for i := 0; i < len(cmd); {
+		token := cmd[i]
+
+		switch {
+		case token.isRedirectOp():
+			path = *cmd[i+1].tok
+			openFile, err = redirectFd(*token.redirectOp, path) // ???????
+			if err != nil {
+				return
+			}
+			i = i + 2
+		case token.isSimpleTok():
+			argv = append(argv, *token.tok)
+			i++
+		}
+	}
+
+	for i := 1; i < len(argv); i++ {
+		arg := argv[i]
+		sb.WriteString(arg)
+		if i < len(argv)-1 {
 			sb.WriteString(" ")
 		} else {
 			sb.WriteString("\n")
 		}
 	}
-	fmt.Fprintf(cmd.fds[STDOUT], sb.String())
+	fmt.Fprintf(openFile, sb.String())
 }
 
-func (cmd *Cmd) exit() error {
-	if len(cmd.argv) != 2 {
-		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.getArgv()))
-		return errors.New(notFound(cmd.getArgv()))
+func (shell *Shell) exit() error {
+	cmd := shell.builtin
+
+	if len(cmd) != 2 {
+		fmt.Fprintf(os.Stderr, notFound(stringify(cmd)))
+		return NewNotFoundError(stringify(cmd))
 	}
-	v, err := strconv.Atoi(cmd.argv[1])
+	exitStatus := *cmd[1].tok
+	v, err := strconv.Atoi(exitStatus)
+
 	if err != nil || v != 0 {
-		fmt.Fprintf(cmd.fds[STDERR], notFound(cmd.getArgv()))
-		return ExitErr
-		// return errors.New(notFound(cmd.getArgv()))
+		fmt.Fprintf(os.Stderr, notFound(stringify(cmd)))
+		return NewNotFoundError(stringify(cmd))
 	}
+
 	return nil
 }
 
-func (cmd *Cmd) typeCommand() {
-	for _, arg := range cmd.argv[1:] {
-		if ok := cmd.isBuiltin(arg); ok {
-			fmt.Fprintf(cmd.fds[STDOUT], fmt.Sprintf("%s is a shell builtin\n", arg))
+func (shell *Shell) typeCommand() {
+	cmd := shell.builtin
+
+	for _, token := range cmd[1:] {
+		arg := *token.tok
+
+		if ok := isBuiltin(arg); ok {
+			fmt.Fprintf(os.Stderr, fmt.Sprintf("%s is a shell builtin\n", arg))
 			continue // this is different from bash for shell builtins
 		}
 
 		if path, err := exec.LookPath(arg); err == nil {
-			fmt.Fprintf(cmd.fds[STDOUT], "%s is %s\n", arg, path)
+			fmt.Fprintf(os.Stderr, "%s is %s\n", arg, path)
 		} else {
-			fmt.Fprintf(cmd.fds[STDOUT], notFound(arg))
+			fmt.Fprintf(os.Stderr, notFound(arg))
 		}
 	}
 }
 
-func (cmd *Cmd) pwd() {
+func (cmd *Shell) pwd() {
 	if path, err := os.Getwd(); err == nil {
-		fmt.Fprintf(cmd.fds[STDOUT], "%s\n", path)
+		fmt.Fprintf(os.Stderr, "%s\n", path)
 	}
 }
 
-func (cmd *Cmd) cd() {
+func (shell *Shell) cd() {
+	cmd := shell.builtin
 	var absPath string
-	path := cmd.argv[1]
+	path := *cmd[1].tok
 
 	if invalidPath, err := regexp.Match(".*[\\.]{3,}.*", []byte(path)); err == nil && invalidPath {
-		fmt.Fprintf(cmd.fds[STDERR], "cd: %s: No such file or directory\n", absPath)
+		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
 		return
 	}
 
 	if strings.HasPrefix(path, "~") {
 		home := os.Getenv("HOME")
 		if len(path) == 0 {
-			fmt.Fprintf(cmd.fds[STDERR], "Failed to access HOME environment variable\n")
+			fmt.Fprintf(os.Stderr, "Failed to access HOME environment variable\n")
 			return
 		}
 		path = filepath.Join(home, path[1:])
@@ -344,13 +294,13 @@ func (cmd *Cmd) cd() {
 
 		cwd, err := os.Getwd()
 		if err != nil {
-			fmt.Fprintln(cmd.fds[STDERR], "Failed to print current working directory")
+			fmt.Fprintln(os.Stderr, "Failed to print current working directory")
 		}
 		absPath = filepath.Join(cwd, path)
 	}
 
 	if err := os.Chdir(absPath); err != nil {
-		fmt.Fprintf(cmd.fds[STDERR], "cd: %s: No such file or directory\n", absPath)
+		fmt.Fprintf(shell.fds[STDERR], "cd: %s: No such file or directory\n", absPath)
 		return
 	}
 
@@ -359,4 +309,128 @@ func (cmd *Cmd) cd() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
+	argv := []string{}
+	var fd = STDOUT
+	var err error
+	var openFile *os.File
+	var path string
+
+	for i := 0; i < len(tokens); {
+		token := tokens[i]
+
+		switch {
+		case token.isRedirectOp():
+			path = *tokens[i+1].tok
+			openFile, err = redirectFd(*token.redirectOp, path) // ???????
+			fd = token.redirectOp.fd
+			if err != nil {
+				// fmt.Printf(err.Error())
+				return nil, err
+			}
+			i = i + 2
+		case token.isSimpleTok():
+			argv = append(argv, *token.tok)
+			i++
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+
+	if openFile != nil {
+		switch fd {
+		case STDIN:
+			cmd.Stdin = openFile
+		case STDOUT:
+			cmd.Stdout = openFile
+		case STDERR:
+			cmd.Stderr = openFile
+		}
+	}
+	return cmd, nil
+}
+
+func executeCmd(
+	pr io.Reader,
+	pw *io.PipeWriter,
+	cmd *exec.Cmd,
+	prevCmd *exec.Cmd,
+	lastCmd bool,
+) (error, *io.PipeWriter, *io.PipeReader) {
+
+	if cmd.Stdin == nil && pr != nil {
+		cmd.Stdin = pr
+	}
+
+	var nextPw *io.PipeWriter = nil
+	var nextPr *io.PipeReader = nil
+	if !lastCmd {
+		nextPr, nextPw = io.Pipe()
+		if cmd.Stdout == nil {
+			cmd.Stdout = nextPw
+		}
+	} else {
+		if cmd.Stdout == nil {
+			cmd.Stdout = os.Stdout
+		}
+	}
+
+	if cmd.Stderr == nil {
+		cmd.Stderr = os.Stderr
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err, nil, nil
+	}
+
+	if prevCmd != nil {
+		go func() {
+			// TODO: lift errors
+			prevCmd.Wait()
+			if pw != nil {
+				pw.Close()
+			}
+		}()
+	}
+
+	defer func() {
+		if cmd.Stdout != os.Stdout {
+			if file, ok := cmd.Stdout.(*os.File); ok {
+				file.Close()
+			}
+		}
+		if cmd.Stderr != os.Stderr {
+			if file, ok := cmd.Stderr.(*os.File); ok {
+				file.Close()
+			}
+		}
+	}()
+
+	return nil, nextPw, nextPr
+}
+
+func (shell *Shell) executeCmds() error {
+	var pw *io.PipeWriter
+	var pr io.Reader = nil
+	var prevCmd *exec.Cmd
+
+	for i, cmd := range (*shell).cmds {
+		lastCmd := i+1 == len((*shell).cmds)
+		err, nextPw, nextPr := executeCmd(pr, pw, cmd, prevCmd, lastCmd)
+		if err != nil {
+			return err
+		}
+		pw = nextPw
+		pr = nextPr
+		prevCmd = cmd
+	}
+
+	if prevCmd != nil {
+		if err := prevCmd.Wait(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
