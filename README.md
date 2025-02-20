@@ -4,6 +4,12 @@
 
 This is a fun little project for me to get more familiar with Go, its Stdlib and idiomatic use. So why the heck not?
 
+## Built and Run
+
+```bash
+go build -o shell cmd/myshell/*.go && ./shell
+```
+
 ## Supported Features
 
 - Shell builtins: `echo`, `type`, `pwd`, `cd`
