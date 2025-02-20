@@ -174,6 +174,31 @@ func (p *Parser) parse(input string) ([]token, error) {
 				i++
 			}
 
+		case '<':
+
+			if !p.doubleQuoted && !p.singleQuoted {
+				fd := STDIN
+				token := newRedirectOpWithFd(">|", fd)
+				*p.tokens = append(*p.tokens, token)
+
+				if i+1 < len(input) { // should always be the case cause inputs ends with '\n' but just to be sure
+					// check that '<' is followed by something and doesn't end with '\n'
+					foundNonWhiteSpaceCh := false
+					for j := i + 1; j < len(input); j++ {
+						if j != ' ' && j != '\t' && j != '\n' {
+							foundNonWhiteSpaceCh = true
+						}
+					}
+					if !foundNonWhiteSpaceCh {
+						return nil, NewUnexpectedTokenError("newline")
+					}
+				}
+
+			} else if p.doubleQuoted || p.singleQuoted {
+				arg = append(arg, ch)
+				i++
+			}
+
 		case '\\':
 
 			if !p.doubleQuoted && !p.singleQuoted && i+1 < len(input) {

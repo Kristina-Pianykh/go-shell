@@ -101,6 +101,17 @@ func redirectFd(redirectToken redirectOp, filePath string) (*os.File, error) {
 		}
 
 		return file, nil
+	case "<":
+		mkParentDirIfAbsent(filePath)
+		file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_EXCL|os.O_CREATE, 0644)
+		if errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		if err != nil {
+			panic(err) // FIXME: any other relevant errors?
+		}
+
+		return file, nil
 	default:
 		return nil, UnknownOperatorErr
 	}
