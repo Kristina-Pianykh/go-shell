@@ -154,7 +154,11 @@ func (shell *Shell) validateCmds(cmds [][]token) error {
 		}
 		_, err := exec.LookPath(*bin)
 		if err != nil {
-			return err
+			if errors.Is(err, exec.ErrDot) {
+				return err
+			} else {
+				return NewNotFoundError(*bin)
+			}
 		}
 	}
 
@@ -229,14 +233,14 @@ func (shell *Shell) exit() error {
 	cmd := shell.builtin
 
 	if len(cmd) != 2 {
-		fmt.Fprintf(os.Stderr, notFound(stringify(cmd)))
+		fmt.Fprintf(os.Stderr, "%s\n", notFound(stringify(cmd)))
 		return NewNotFoundError(stringify(cmd))
 	}
 	exitStatus := *cmd[1].tok
 	v, err := strconv.Atoi(exitStatus)
 
 	if err != nil || v != 0 {
-		fmt.Fprintf(os.Stderr, notFound(stringify(cmd)))
+		fmt.Fprintf(os.Stderr, "%s\n", notFound(stringify(cmd)))
 		return NewNotFoundError(stringify(cmd))
 	}
 
@@ -257,7 +261,7 @@ func (shell *Shell) typeCommand() {
 		if path, err := exec.LookPath(arg); err == nil {
 			fmt.Fprintf(os.Stderr, "%s is %s\n", arg, path)
 		} else {
-			fmt.Fprintf(os.Stderr, notFound(arg))
+			fmt.Fprintf(os.Stderr, "%s\n", notFound(arg))
 		}
 	}
 }

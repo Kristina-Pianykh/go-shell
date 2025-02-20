@@ -285,7 +285,7 @@ func truncateLeadingZeros(s string) string {
 
 func notFound(input string) string {
 	input = removeNewLinesIfPresent(input)
-	return fmt.Sprintf("%s: not found\n", input)
+	return fmt.Sprintf("%s: not found", input)
 }
 
 func removeNewLinesIfPresent(s string) string {
