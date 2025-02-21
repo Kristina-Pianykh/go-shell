@@ -4,6 +4,8 @@
 
 This is a fun little project for me to get more familiar with Go, its Stdlib and idiomatic use. So why the heck not?
 
+More on the background of the project in this [blog post](https://kristina-pianykh.github.io/blog/posts/shell/).
+
 ## Built and Run
 
 ```bash
