@@ -71,7 +71,9 @@ func redirectFd(redirectToken redirectOp, filePath string) (*os.File, error) {
 	// TODO: do we validate the fd value?
 	switch redirectToken.op {
 	case ">":
-		mkParentDirIfAbsent(filePath)
+		if err := mkParentDirIfAbsent(filePath); err != nil {
+			return nil, err
+		}
 		file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_EXCL|os.O_CREATE, 0644)
 		if errors.Is(err, os.ErrExist) {
 			return nil, err
@@ -82,7 +84,9 @@ func redirectFd(redirectToken redirectOp, filePath string) (*os.File, error) {
 
 		return file, nil
 	case ">|":
-		mkParentDirIfAbsent(filePath)
+		if err := mkParentDirIfAbsent(filePath); err != nil {
+			return nil, err
+		}
 		file, err := os.OpenFile(filePath, os.O_RDWR|os.O_TRUNC|os.O_CREATE, 0644)
 		if err != nil {
 			panic(err) // FIXME: any relevant errors?
@@ -106,21 +110,22 @@ func redirectFd(redirectToken redirectOp, filePath string) (*os.File, error) {
 	}
 }
 
-func mkParentDirIfAbsent(path string) {
+func mkParentDirIfAbsent(path string) error {
 	dir := filepath.Dir(path)
 	_, err := os.Stat(dir)
 	if os.IsNotExist(err) {
 		err := os.MkdirAll(dir, 0750)
 		if err != nil {
-			panic(err)
+			return err
 		}
 	}
+	return nil
 }
 
 func (shell *Shell) runBuiltin() error {
 	token := (*shell).builtin[0]
 	if token.literal == nil {
-		return errors.New(fmt.Sprintf("expected builtin, got %s", token.string()))
+		return fmt.Errorf("expected builtin, got %s", token.string())
 	}
 
 	switch *token.literal {
@@ -137,7 +142,9 @@ func (shell *Shell) runBuiltin() error {
 	case PWD:
 		shell.pwd()
 	case CD:
-		shell.cd()
+		if err := shell.cd(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -209,6 +216,7 @@ func (shell *Shell) echo() {
 			path = *cmd[i+1].literal
 			openFile, err = redirectFd(*token.redirectOp, path) // ???????
 			if err != nil {
+				_ = openFile.Close()
 				return
 			}
 			fd = token.redirectOp.fd
@@ -234,6 +242,8 @@ func (shell *Shell) echo() {
 	case STDERR:
 		fmt.Fprintf(openFile, "")
 		fmt.Fprintf(os.Stdout, sb.String())
+	default:
+		fmt.Fprintf(openFile, sb.String())
 	}
 }
 
@@ -280,21 +290,21 @@ func (cmd *Shell) pwd() {
 	}
 }
 
-func (shell *Shell) cd() {
+func (shell *Shell) cd() error {
 	cmd := shell.builtin
 	var absPath string
 	path := *cmd[1].literal
 
 	if invalidPath, err := regexp.Match(".*[\\.]{3,}.*", []byte(path)); err == nil && invalidPath {
-		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
-		return
+		// fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
+		return fmt.Errorf("cd: %s: No such file or directory", absPath)
 	}
 
 	if strings.HasPrefix(path, "~") {
 		home := os.Getenv("HOME")
 		if len(path) == 0 {
-			fmt.Fprintf(os.Stderr, "Failed to access HOME environment variable\n")
-			return
+			// fmt.Fprintf(os.Stderr, "Failed to access HOME environment variable\n")
+			return errors.New("Failed to access HOME environment variable")
 		}
 		path = filepath.Join(home, path[1:])
 	}
@@ -306,21 +316,21 @@ func (shell *Shell) cd() {
 
 		cwd, err := os.Getwd()
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "Failed to print current working directory")
+			return errors.New("Failed to fetch current working directory")
+			// fmt.Fprintln(os.Stderr, "Failed to print current working directory\n")
 		}
 		absPath = filepath.Join(cwd, path)
 	}
 
 	if err := os.Chdir(absPath); err != nil {
-		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
-		return
+		// fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
+		return fmt.Errorf("cd: %s: No such file or directory", absPath)
 	}
 
-	// not sure we need to do this
-	err := os.Setenv("PWD", absPath)
-	if err != nil {
-		panic(err)
+	if err := os.Setenv("PWD", absPath); err != nil {
+		return err
 	}
+	return nil
 }
 
 func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
@@ -336,10 +346,9 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 		switch {
 		case token.isRedirectOp():
 			path = *tokens[i+1].literal
-			openFile, err = redirectFd(*token.redirectOp, path) // ???????
+			openFile, err = redirectFd(*token.redirectOp, path)
 			fd = token.redirectOp.fd
 			if err != nil {
-				// fmt.Printf(err.Error())
 				return nil, err
 			}
 			i = i + 2
@@ -359,6 +368,9 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 			cmd.Stdout = openFile
 		case STDERR:
 			cmd.Stderr = openFile
+		default:
+			// TODO: handle redirection for non-std fds (also close after use!)
+			cmd.ExtraFiles = append(cmd.ExtraFiles, openFile)
 		}
 	}
 	return cmd, nil
@@ -400,9 +412,9 @@ func executeCmd(
 	if prevCmd != nil {
 		go func() {
 			// TODO: lift errors
-			prevCmd.Wait()
+			_ = prevCmd.Wait()
 			if pw != nil {
-				pw.Close()
+				_ = pw.Close()
 			}
 		}()
 	}
@@ -410,12 +422,12 @@ func executeCmd(
 	defer func() {
 		if cmd.Stdout != os.Stdout {
 			if file, ok := cmd.Stdout.(*os.File); ok {
-				file.Close()
+				_ = file.Close()
 			}
 		}
 		if cmd.Stderr != os.Stderr {
 			if file, ok := cmd.Stderr.(*os.File); ok {
-				file.Close()
+				_ = file.Close()
 			}
 		}
 	}()

@@ -25,7 +25,7 @@ const (
 const MAX_INT = int((uint(1) << 63) - 1)
 
 func ringBell() {
-	os.Stdout.Write([]byte{'\a'})
+	_, _ = os.Stdout.Write([]byte{'\a'})
 }
 
 func handleRegularKeyPress(input []byte, key byte, prompt string) []byte {
@@ -178,7 +178,10 @@ func autoCmplBin(s []byte) []string {
 	clean := strings.TrimLeft(string(s), " \t")
 	results := []string{}
 
-	files := searchPathForBins(clean)
+	files, err := searchPathForBins(clean)
+	if err != nil {
+		return results
+	}
 	for _, file := range files {
 		res := cmplInput(s, file)
 		results = append(results, string(res))
@@ -191,7 +194,7 @@ func stripLeft(s []byte) []byte {
 	return []byte(strings.TrimLeft(string(s), "\t "))
 }
 
-func searchPathForBins(prefix string) []string {
+func searchPathForBins(prefix string) ([]string, error) {
 	// TODO: if file is a path
 	// TODO: fix with the idea that `file` is incomplete
 	bins := []string{}
@@ -215,21 +218,25 @@ func searchPathForBins(prefix string) []string {
 		entry, err := os.ReadDir(dir)
 		if err != nil {
 			if !errors.Is(err, fs.ErrNotExist) {
-				panic(err)
+				return nil, err
 			}
 		}
 
 		// TODO: use binary search?
 		for _, e := range sharePrefix(entry, prefix) {
 			execPath := filepath.Join(dir, e)
-			if err := isExec(execPath); err == nil {
-				if !slices.Contains(bins, e) {
-					bins = append(bins, e)
-				}
+			err := isExec(execPath)
+
+			if err != nil {
+				return nil, err
+			}
+
+			if !slices.Contains(bins, e) {
+				bins = append(bins, e)
 			}
 		}
 	}
-	return bins
+	return bins, nil
 }
 
 func isExec(file string) error {
@@ -271,7 +278,7 @@ func readInput(inputCh chan string, prompt string) {
 
 	defer func() {
 		fmt.Fprint(os.Stdout, "\r\n")
-		os.Stdout.Sync()
+		_ = os.Stdout.Sync()
 		input = append(input, '\n')
 		inputCh <- string(input)
 		close(inputCh)
@@ -284,6 +291,7 @@ func readInput(inputCh chan string, prompt string) {
 			if errors.Is(err, io.EOF) {
 				return
 			} else {
+				// FIXME: recover
 				panic(err)
 			}
 		}

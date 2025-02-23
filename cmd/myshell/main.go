@@ -26,6 +26,9 @@ func main() {
 		if errors.Is(err, ExitErr) {
 			return
 		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+		}
 	}
 }
 
@@ -37,7 +40,7 @@ func cmdLifecycle(ctx context.Context) error {
 	)
 	tokenCh := make(chan []token)
 	fmt.Fprint(os.Stdout, regularPrompt)
-	os.Stdout.Sync()
+	_ = os.Stdout.Sync()
 	go parseInput(tokenCh)
 
 	select {
