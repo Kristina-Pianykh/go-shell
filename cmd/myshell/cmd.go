@@ -43,7 +43,7 @@ func NewShell(sets [][]token, ctx context.Context) (*Shell, error) {
 	// check if builtin
 	if len(sets) == 1 {
 		set := sets[0]
-		if token := *set[0].tok; isBuiltin(token) {
+		if token := *set[0].literal; isBuiltin(token) {
 			shell.builtin = set
 			return shell, nil
 		}
@@ -119,11 +119,11 @@ func mkParentDirIfAbsent(path string) {
 
 func (shell *Shell) runBuiltin() error {
 	token := (*shell).builtin[0]
-	if token.tok == nil {
+	if token.literal == nil {
 		return errors.New(fmt.Sprintf("expected builtin, got %s", token.string()))
 	}
 
-	switch *token.tok {
+	switch *token.literal {
 	case EXIT:
 		// TODO: call original binary instead of doing builtin
 		// graceful shutdown with cancel context instead of killing with no defers run
@@ -148,7 +148,7 @@ func (shell *Shell) validateCmds(cmds [][]token) error {
 	// redirectionOps := []string{">", ">|", ">>"}
 
 	for _, cmd := range cmds {
-		bin := cmd[0].tok
+		bin := cmd[0].literal
 		if bin == nil {
 			return errors.New(fmt.Sprintf("expected binary name, got %s", cmd[0].string()))
 		}
@@ -171,7 +171,7 @@ func stringify(lst []token) string {
 
 		switch {
 		case arg.isSimpleTok():
-			sb.WriteString(*arg.tok)
+			sb.WriteString(*arg.literal)
 		case arg.isRedirectOp():
 			sb.WriteString(arg.redirectOp.op)
 		}
@@ -206,7 +206,7 @@ func (shell *Shell) echo() {
 
 		switch {
 		case token.isRedirectOp():
-			path = *cmd[i+1].tok
+			path = *cmd[i+1].literal
 			openFile, err = redirectFd(*token.redirectOp, path) // ???????
 			if err != nil {
 				return
@@ -214,7 +214,7 @@ func (shell *Shell) echo() {
 			fd = token.redirectOp.fd
 			i = i + 2
 		case token.isSimpleTok():
-			argv = append(argv, *token.tok)
+			argv = append(argv, *token.literal)
 			i++
 		}
 	}
@@ -244,7 +244,7 @@ func (shell *Shell) exit() error {
 		fmt.Fprintf(os.Stderr, "%s\n", notFound(stringify(cmd)))
 		return NewNotFoundError(stringify(cmd))
 	}
-	exitStatus := *cmd[1].tok
+	exitStatus := *cmd[1].literal
 	v, err := strconv.Atoi(exitStatus)
 
 	if err != nil || v != 0 {
@@ -259,7 +259,7 @@ func (shell *Shell) typeCommand() {
 	cmd := shell.builtin
 
 	for _, token := range cmd[1:] {
-		arg := *token.tok
+		arg := *token.literal
 
 		if ok := isBuiltin(arg); ok {
 			fmt.Fprintf(os.Stderr, fmt.Sprintf("%s is a shell builtin\n", arg))
@@ -283,7 +283,7 @@ func (cmd *Shell) pwd() {
 func (shell *Shell) cd() {
 	cmd := shell.builtin
 	var absPath string
-	path := *cmd[1].tok
+	path := *cmd[1].literal
 
 	if invalidPath, err := regexp.Match(".*[\\.]{3,}.*", []byte(path)); err == nil && invalidPath {
 		fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
@@ -335,7 +335,7 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 
 		switch {
 		case token.isRedirectOp():
-			path = *tokens[i+1].tok
+			path = *tokens[i+1].literal
 			openFile, err = redirectFd(*token.redirectOp, path) // ???????
 			fd = token.redirectOp.fd
 			if err != nil {
@@ -344,7 +344,7 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 			}
 			i = i + 2
 		case token.isSimpleTok():
-			argv = append(argv, *token.tok)
+			argv = append(argv, *token.literal)
 			i++
 		}
 	}

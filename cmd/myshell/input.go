@@ -341,11 +341,6 @@ Loop:
 			return
 		}
 		tokens, err := parser.parse(input)
-		// for _, tok := range tokens {
-		// 	fmt.Printf("%s\n", tok.string())
-		// }
-		// fmt.Printf("parser state: %s\n", parser.state())
-		// fmt.Printf("tokens: %v; len: %d\n", tokens, len(tokens))
 		if err != nil && (errors.Is(err, UnclosedQuoteErr) || errors.Is(err, PipeHasNoTargetErr)) {
 			prompt = awaitPrompt
 			drawPrompt(awaitPrompt)
@@ -356,16 +351,13 @@ Loop:
 			return
 		}
 
-		// for i, token := range tokens {
-		// 	fmt.Printf("%d: %s\n", i, token.string())
-		// }
 		tokenCh <- tokens
 		return
 	}
 }
 
 func (t token) isValid() bool {
-	if (t.tok != nil && t.redirectOp != nil) || (t.tok == nil && t.redirectOp == nil) {
+	if (t.literal != nil && t.redirectOp != nil) || (t.literal == nil && t.redirectOp == nil) {
 		return false
 	}
 	return true
@@ -376,7 +368,7 @@ func splitAtPipe(tokens []token) [][]token {
 	idx := 0
 
 	for _, tok := range tokens {
-		if tok.tok != nil && *tok.tok == "|" {
+		if tok.literal != nil && *tok.literal == "|" {
 			cmds = append(cmds, []token{})
 			idx++
 			continue

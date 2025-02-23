@@ -19,7 +19,7 @@ type redirectOp struct {
 }
 
 type token struct {
-	tok        *string
+	literal    *string
 	redirectOp *redirectOp
 }
 
@@ -27,7 +27,7 @@ func (t token) isSimpleTok() bool {
 	if !t.isValid() {
 		return false
 	}
-	if t.tok != nil && t.redirectOp == nil {
+	if t.literal != nil && t.redirectOp == nil {
 		return true
 	}
 	return false
@@ -37,14 +37,14 @@ func (t token) isRedirectOp() bool {
 	if !t.isValid() {
 		return false
 	}
-	if t.tok == nil && t.redirectOp != nil {
+	if t.literal == nil && t.redirectOp != nil {
 		return true
 	}
 	return false
 }
 
 func newToken(s string) token {
-	return token{tok: &s}
+	return token{literal: &s}
 }
 
 func newRedirectOpWithFd(op string, fd int) token {
@@ -56,10 +56,10 @@ func (t token) string() string {
 	var tokString string
 	var redirectOp string
 
-	if t.tok == nil {
+	if t.literal == nil {
 		tokString = "nil"
 	} else {
-		tokString = *t.tok
+		tokString = *t.literal
 	}
 	if t.redirectOp == nil {
 		redirectOp = "nil"
