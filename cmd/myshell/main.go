@@ -39,11 +39,14 @@ func cmdLifecycle(ctx context.Context) error {
 		ok     bool
 	)
 	tokenCh := make(chan []token)
+	errorCh := make(chan error, 1)
 	fmt.Fprint(os.Stdout, regularPrompt)
 	_ = os.Stdout.Sync()
-	go parseInput(tokenCh)
+	go parseInput(tokenCh, errorCh)
 
 	select {
+	case err := <-errorCh:
+		return err
 	case tokens, ok = <-tokenCh:
 		if !ok {
 			fmt.Println()

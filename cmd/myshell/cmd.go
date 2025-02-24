@@ -43,9 +43,11 @@ func NewShell(sets [][]token, ctx context.Context) (*Shell, error) {
 	// check if builtin
 	if len(sets) == 1 {
 		set := sets[0]
-		if token := *set[0].literal; isBuiltin(token) {
-			shell.builtin = set
-			return shell, nil
+		if token, ok := set[0].(*literalToken); ok {
+			if isBuiltin(token.literal) {
+				shell.builtin = set
+				return shell, nil
+			}
 		}
 	}
 
@@ -124,11 +126,12 @@ func mkParentDirIfAbsent(path string) error {
 
 func (shell *Shell) runBuiltin() error {
 	token := (*shell).builtin[0]
-	if token.literal == nil {
+	t, ok := token.(*literalToken)
+	if !ok {
 		return fmt.Errorf("expected builtin, got %s", token.string())
 	}
 
-	switch *token.literal {
+	switch t.literal {
 	case EXIT:
 		// TODO: call original binary instead of doing builtin
 		// graceful shutdown with cancel context instead of killing with no defers run
@@ -155,16 +158,17 @@ func (shell *Shell) validateCmds(cmds [][]token) error {
 	// redirectionOps := []string{">", ">|", ">>"}
 
 	for _, cmd := range cmds {
-		bin := cmd[0].literal
-		if bin == nil {
-			return errors.New(fmt.Sprintf("expected binary name, got %s", cmd[0].string()))
+		tok, ok := cmd[0].(*literalToken)
+		if !ok {
+			return errors.New(fmt.Sprintf("expected binary name, got %s", stringify(cmd)))
 		}
-		_, err := exec.LookPath(*bin)
+		bin := tok.literal
+		_, err := exec.LookPath(bin)
 		if err != nil {
 			if errors.Is(err, exec.ErrDot) {
 				return err
 			} else {
-				return NewNotFoundError(*bin)
+				return NewNotFoundError(bin)
 			}
 		}
 	}
@@ -175,13 +179,7 @@ func (shell *Shell) validateCmds(cmds [][]token) error {
 func stringify(lst []token) string {
 	var sb strings.Builder
 	for i, arg := range lst {
-
-		switch {
-		case arg.isSimpleTok():
-			sb.WriteString(*arg.literal)
-		case arg.isRedirectOp():
-			sb.WriteString(arg.redirectOp.op)
-		}
+		sb.WriteString(arg.string())
 
 		if i < len(lst)-1 {
 			sb.WriteString(" ")
@@ -202,7 +200,6 @@ func isBuiltin(str string) bool {
 func (shell *Shell) echo() {
 	cmd := shell.builtin
 	var sb strings.Builder
-	var path string
 	var err error
 	openFile := os.Stdout
 	fd := STDOUT
@@ -211,19 +208,23 @@ func (shell *Shell) echo() {
 	for i := 0; i < len(cmd); {
 		token := cmd[i]
 
-		switch {
-		case token.isRedirectOp():
-			path = *cmd[i+1].literal
-			openFile, err = redirectFd(*token.redirectOp, path) // ???????
+		switch t := token.(type) {
+		case *literalToken:
+			argv = append(argv, t.literal)
+			i++
+		case *redirectOp:
+			pathTok, ok := cmd[i+1].(*literalToken)
+			if !ok {
+				fmt.Fprintf(os.Stderr, "Expected literalToken for path, got %s\n", cmd[i+1].string())
+				return
+			}
+			openFile, err = redirectFd(*t, pathTok.literal)
 			if err != nil {
 				_ = openFile.Close()
 				return
 			}
-			fd = token.redirectOp.fd
+			fd = t.fd
 			i = i + 2
-		case token.isSimpleTok():
-			argv = append(argv, *token.literal)
-			i++
 		}
 	}
 
@@ -254,10 +255,13 @@ func (shell *Shell) exit() error {
 		fmt.Fprintf(os.Stderr, "%s\n", notFound(stringify(cmd)))
 		return NewNotFoundError(stringify(cmd))
 	}
-	exitStatus := *cmd[1].literal
-	v, err := strconv.Atoi(exitStatus)
+	t, ok := cmd[1].(*literalToken)
+	if !ok {
+		return fmt.Errorf("Expected int, got %s", cmd[1].string())
+	}
+	exitStatus, err := strconv.Atoi(t.literal)
 
-	if err != nil || v != 0 {
+	if err != nil || exitStatus != 0 {
 		fmt.Fprintf(os.Stderr, "%s\n", notFound(stringify(cmd)))
 		return NewNotFoundError(stringify(cmd))
 	}
@@ -269,8 +273,12 @@ func (shell *Shell) typeCommand() {
 	cmd := shell.builtin
 
 	for _, token := range cmd[1:] {
-		arg := *token.literal
+		t, ok := token.(*literalToken)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "Expected literalToken as arg, got %s\n", token.string())
+		}
 
+		arg := t.literal
 		if ok := isBuiltin(arg); ok {
 			fmt.Fprintf(os.Stderr, fmt.Sprintf("%s is a shell builtin\n", arg))
 			continue // this is different from bash for shell builtins
@@ -291,19 +299,22 @@ func (cmd *Shell) pwd() {
 }
 
 func (shell *Shell) cd() error {
-	cmd := shell.builtin
 	var absPath string
-	path := *cmd[1].literal
 
+	cmd := shell.builtin
+	t, ok := cmd[1].(*literalToken)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Expected literalToken as arg, got %s\n", cmd[1].string())
+	}
+
+	path := t.literal
 	if invalidPath, err := regexp.Match(".*[\\.]{3,}.*", []byte(path)); err == nil && invalidPath {
-		// fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
 		return fmt.Errorf("cd: %s: No such file or directory", absPath)
 	}
 
 	if strings.HasPrefix(path, "~") {
 		home := os.Getenv("HOME")
 		if len(path) == 0 {
-			// fmt.Fprintf(os.Stderr, "Failed to access HOME environment variable\n")
 			return errors.New("Failed to access HOME environment variable")
 		}
 		path = filepath.Join(home, path[1:])
@@ -317,7 +328,6 @@ func (shell *Shell) cd() error {
 		cwd, err := os.Getwd()
 		if err != nil {
 			return errors.New("Failed to fetch current working directory")
-			// fmt.Fprintln(os.Stderr, "Failed to print current working directory\n")
 		}
 		absPath = filepath.Join(cwd, path)
 	}
@@ -338,23 +348,26 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 	var fd = STDOUT
 	var err error
 	var openFile *os.File
-	var path string
 
 	for i := 0; i < len(tokens); {
 		token := tokens[i]
 
-		switch {
-		case token.isRedirectOp():
-			path = *tokens[i+1].literal
-			openFile, err = redirectFd(*token.redirectOp, path)
-			fd = token.redirectOp.fd
+		switch t := token.(type) {
+		case *literalToken:
+			argv = append(argv, t.literal)
+			i++
+		case *redirectOp:
+			pathTok, ok := tokens[i+1].(*literalToken)
+			if !ok {
+				return nil, fmt.Errorf("Expected literalToken for path, got %s\n", tokens[i+1].string())
+			}
+
+			openFile, err = redirectFd(*t, pathTok.literal)
 			if err != nil {
 				return nil, err
 			}
+			fd = t.fd
 			i = i + 2
-		case token.isSimpleTok():
-			argv = append(argv, *token.literal)
-			i++
 		}
 	}
 
@@ -453,7 +466,10 @@ func (shell *Shell) executeCmds() error {
 
 	if prevCmd != nil {
 		if err := prevCmd.Wait(); err != nil {
-			return err
+			var exitError *exec.ExitError
+			if errors.Is(err, exitError) {
+				return err
+			}
 		}
 	}
 	return nil

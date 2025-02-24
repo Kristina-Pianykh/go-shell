@@ -297,7 +297,7 @@ func readInput(inputCh chan string, prompt string) {
 		}
 		b := buf[0]
 		// fmt.Fprintf(logFile, "Received byte: %d (char: %q)\n", b, b)
-		// _ = logFile.Sync()
+		//  = logFile.Sync()
 
 		switch b {
 		case sigint:
@@ -323,6 +323,7 @@ func readInput(inputCh chan string, prompt string) {
 
 func parseInput(
 	tokenCh chan []token,
+	errorCh chan error,
 ) {
 	parser := newParser()
 
@@ -333,6 +334,7 @@ func parseInput(
 
 	defer func() {
 		close(tokenCh)
+		close(errorCh)
 		err := term.Restore(int(os.Stdin.Fd()), oldState)
 		if err != nil {
 			panic(err)
@@ -349,13 +351,18 @@ Loop:
 			return
 		}
 		tokens, err := parser.parse(input)
-		if err != nil && (errors.Is(err, UnclosedQuoteErr) || errors.Is(err, PipeHasNoTargetErr)) {
-			prompt = awaitPrompt
-			drawPrompt(awaitPrompt)
-			goto Loop
+		if err != nil {
+			if errors.Is(err, UnclosedQuoteErr) || errors.Is(err, PipeHasNoTargetErr) {
+				prompt = awaitPrompt
+				drawPrompt(awaitPrompt)
+				goto Loop
+			} else {
+				errorCh <- err
+				return
+			}
 		}
 
-		if len(tokens) < 1 {
+		if len(tokens) == 0 {
 			return
 		}
 
@@ -364,19 +371,12 @@ Loop:
 	}
 }
 
-func (t token) isValid() bool {
-	if (t.literal != nil && t.redirectOp != nil) || (t.literal == nil && t.redirectOp == nil) {
-		return false
-	}
-	return true
-}
-
 func splitAtPipe(tokens []token) [][]token {
 	cmds := make([][]token, 1)
 	idx := 0
 
 	for _, tok := range tokens {
-		if tok.literal != nil && *tok.literal == "|" {
+		if t, ok := tok.(*literalToken); ok && t.literal == "|" {
 			cmds = append(cmds, []token{})
 			idx++
 			continue
