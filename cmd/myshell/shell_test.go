@@ -8,38 +8,38 @@ import (
 func TestTokenization(t *testing.T) {
 	tests := []struct {
 		input          string
-		expectedTokens []token
+		expectedTokens []Token
 	}{
 		{
-			"\n", []token{},
+			"\n", []Token{},
 		},
 		{
 			"echo Hello World!\n",
-			[]token{newLiteralToken("echo"), newLiteralToken("Hello"), newLiteralToken("World!")},
+			[]Token{newLiteralToken("echo"), newLiteralToken("Hello"), newLiteralToken("World!")},
 		},
 		{
 			"echo    Hello     World!   \n",
-			[]token{newLiteralToken("echo"), newLiteralToken("Hello"), newLiteralToken("World!")},
+			[]Token{newLiteralToken("echo"), newLiteralToken("Hello"), newLiteralToken("World!")},
 		},
 		{
 			"echo \"Hello World!\"\n",
-			[]token{newLiteralToken("echo"), newLiteralToken("Hello World!")},
+			[]Token{newLiteralToken("echo"), newLiteralToken("Hello World!")},
 		},
 		{
 			"echo \\\"Hello World!\\\"\n",
-			[]token{newLiteralToken("echo"), newLiteralToken("\"Hello"), newLiteralToken("World!\"")},
+			[]Token{newLiteralToken("echo"), newLiteralToken("\"Hello"), newLiteralToken("World!\"")},
 		},
 		{
 			"echo Hello > output.log\n",
-			[]token{newLiteralToken("echo"), newLiteralToken("Hello"), newRedirectToken(">", 1), newLiteralToken("output.log")},
+			[]Token{newLiteralToken("echo"), newLiteralToken("Hello"), newRedirectToken(">", 1), newLiteralToken("output.log")},
 		},
 		{
 			"cat nonexistent 2> error.log\n",
-			[]token{newLiteralToken("cat"), newLiteralToken("nonexistent"), newRedirectToken(">", 2), newLiteralToken("error.log")},
+			[]Token{newLiteralToken("cat"), newLiteralToken("nonexistent"), newRedirectToken(">", 2), newLiteralToken("error.log")},
 		},
 		{
 			"cat file | grep word \n",
-			[]token{newLiteralToken("cat"), newLiteralToken("file"), newLiteralToken("|"), newLiteralToken("grep"), newLiteralToken("word")},
+			[]Token{newLiteralToken("cat"), newLiteralToken("file"), newLiteralToken("|"), newLiteralToken("grep"), newLiteralToken("word")},
 		},
 	}
 
@@ -53,7 +53,7 @@ func TestTokenization(t *testing.T) {
 	}
 }
 
-func testTokens(t *testing.T, testId int, tokens []token, expectedTs []token) {
+func testTokens(t *testing.T, testId int, tokens []Token, expectedTs []Token) {
 	if len(tokens) != len(expectedTs) {
 		t.Fatalf("%d: Expected %d tokens, got %d\n", testId, len(expectedTs), len(tokens))
 	}
@@ -63,19 +63,19 @@ func testTokens(t *testing.T, testId int, tokens []token, expectedTs []token) {
 
 		if reflect.TypeOf(tok) != reflect.TypeOf(expT) {
 			t.Fatalf("%d: expected token '%s' of type=%T, got '%s' of type %T\n",
-				testId, expT.string(), expT, tok.string(), tok)
+				testId, expT.String(), expT, tok.String(), tok)
 		}
 
 		switch v := tok.(type) {
-		case literalToken:
-			expectedLiteralT := expT.(literalToken)
+		case *LiteralToken:
+			expectedLiteralT := expT.(*LiteralToken)
 
 			if v.literal != expectedLiteralT.literal {
 				t.Fatalf("%d: Expected tok.literal=%q, got %q\n", testId, v, expectedLiteralT)
 			}
 
-		case redirectToken:
-			expRedirectT := expT.(redirectToken)
+		case *RedirectToken:
+			expRedirectT := expT.(*RedirectToken)
 
 			if v.op != expRedirectT.op {
 				t.Fatalf("%d: Expected tok.op=%q, got %q\n", testId, v.op, expRedirectT.op)
@@ -93,18 +93,18 @@ func testTokens(t *testing.T, testId int, tokens []token, expectedTs []token) {
 func TestSplitAtPipe(t *testing.T) {
 	tests := []struct {
 		input           string
-		expectedTokSets [][]token
+		expectedTokSets [][]Token
 	}{
 		{
 			"echo hello | grep hello\n",
-			[][]token{
+			[][]Token{
 				{newLiteralToken("echo"), newLiteralToken("hello")},
 				{newLiteralToken("grep"), newLiteralToken("hello")},
 			},
 		},
 		{
 			"cat foo.bar | wc | grep 0\n",
-			[][]token{
+			[][]Token{
 				{newLiteralToken("cat"), newLiteralToken("foo.bar")},
 				{newLiteralToken("wc")},
 				{newLiteralToken("grep"), newLiteralToken("0")},

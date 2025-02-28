@@ -7,58 +7,58 @@ import (
 )
 
 type Parser struct {
-	tokens       *[]token
+	tokens       []Token
 	singleQuoted bool
 	doubleQuoted bool
 	pipeComplete bool
 }
 
-type token interface {
-	tokenType()
-	string() string
+type Token interface {
+	TokenType()
+	String() string
 }
 
-type literalToken struct {
+type LiteralToken struct {
 	literal string
 }
 
-func (t *literalToken) tokenType() {}
+func (t *LiteralToken) TokenType() {}
 
-func (t *literalToken) string() string {
+func (t *LiteralToken) String() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("literalToken{literal: %s}", t.literal))
 	return sb.String()
 }
 
-type redirectToken struct {
+type RedirectToken struct {
 	op string
 	fd int
 }
 
-func (t *redirectToken) tokenType() {}
+func (t *RedirectToken) TokenType() {}
 
-func (t *redirectToken) string() string {
+func (t *RedirectToken) String() string {
 	var sb strings.Builder
 	s := fmt.Sprintf("redirectOp{op: %s, fd: %d}", t.op, t.fd)
 	sb.WriteString(s)
 	return sb.String()
 }
 
-func newLiteralToken(s string) token {
-	var t token
-	t = &literalToken{s}
+func newLiteralToken(s string) Token {
+	var t Token
+	t = &LiteralToken{s}
 	return t
 }
 
-func newRedirectOpWithFd(op string, fd int) token {
-	var t token
-	t = &redirectToken{op: op, fd: fd}
+func newRedirectToken(op string, fd int) Token {
+	var t Token
+	t = &RedirectToken{op: op, fd: fd}
 	return t
 }
 
 func newParser() *Parser {
 	return &Parser{
-		tokens:       nil,
+		tokens:       []Token{},
 		singleQuoted: false,
 		doubleQuoted: false,
 		pipeComplete: true,
@@ -66,18 +66,15 @@ func newParser() *Parser {
 }
 
 func (p *Parser) state() string {
-	tokens := []token{}
+	tokens := []Token{}
 
 	if p.tokens != nil {
-		tokens = *p.tokens
+		tokens = p.tokens
 	}
 	return fmt.Sprintf("tokens: %v, singleQuoted: %v, doubleQuoted: %v, pipeComplete: %v", tokens, p.singleQuoted, p.doubleQuoted, p.pipeComplete)
 }
 
-func (p *Parser) parse(input string) ([]token, error) {
-	if p.tokens == nil {
-		p.tokens = &[]token{}
-	}
+func (p *Parser) parse(input string) error {
 	arg := []byte{}
 
 	i := 0
@@ -89,18 +86,18 @@ func (p *Parser) parse(input string) ([]token, error) {
 		switch ch {
 		case '|':
 
-			if len(*p.tokens) == 0 && len(arg) == 0 {
-				return nil, NewUnexpectedTokenError("|")
+			if len(p.tokens) == 0 && len(arg) == 0 {
+				return NewUnexpectedTokenError("|")
 			}
 
 			if len(arg) > 0 {
 				token := newLiteralToken(string(arg))
-				*p.tokens = append(*p.tokens, token)
+				p.tokens = append(p.tokens, token)
 				arg = arg[:0]
 			}
 
 			token := newLiteralToken(("|"))
-			*p.tokens = append(*p.tokens, token)
+			p.tokens = append(p.tokens, token)
 			p.pipeComplete = false
 			i++
 
@@ -126,20 +123,20 @@ func (p *Parser) parse(input string) ([]token, error) {
 
 					var j int // next char after the op '>[|]' or '>>'
 					if input[i+1] == '|' {
-						token := newRedirectOpWithFd(">|", fd)
-						*p.tokens = append(*p.tokens, token)
+						token := newRedirectToken(">|", fd)
+						p.tokens = append(p.tokens, token)
 						j = i + 2
 						i = i + 2
 
 						// FIXME: can pipe follow '>>': '>>[|]'?
 					} else if input[i+1] == '>' {
-						token := newRedirectOpWithFd(">>", fd)
-						*p.tokens = append(*p.tokens, token)
+						token := newRedirectToken(">>", fd)
+						p.tokens = append(p.tokens, token)
 						j = i + 2
 						i = i + 2
 					} else {
-						token := newRedirectOpWithFd(">", fd)
-						*p.tokens = append(*p.tokens, token)
+						token := newRedirectToken(">", fd)
+						p.tokens = append(p.tokens, token)
 						j = i + 1
 						i++
 					}
@@ -152,7 +149,7 @@ func (p *Parser) parse(input string) ([]token, error) {
 						}
 					}
 					if !foundNonWhiteSpaceCh {
-						return nil, NewUnexpectedTokenError("newline")
+						return NewUnexpectedTokenError("newline")
 					}
 				}
 
@@ -209,7 +206,7 @@ func (p *Parser) parse(input string) ([]token, error) {
 
 				if len(arg) > 0 {
 					token := newLiteralToken(string(arg))
-					*p.tokens = append(*p.tokens, token)
+					p.tokens = append(p.tokens, token)
 				}
 				arg = arg[:0]
 			}
@@ -221,21 +218,21 @@ func (p *Parser) parse(input string) ([]token, error) {
 				// prompt user for more input: incomplete/invalid echo command!
 				arg = append(arg, ch)
 				token := newLiteralToken(string(arg))
-				*p.tokens = append(*p.tokens, token)
+				p.tokens = append(p.tokens, token)
 				arg = arg[:0]
-				return nil, UnclosedQuoteErr
+				return UnclosedQuoteErr
 
 			} else if !p.singleQuoted && !p.doubleQuoted {
 				// we are done
 				if len(arg) > 0 {
 					token := newLiteralToken(string(arg))
-					*p.tokens = append(*p.tokens, token)
+					p.tokens = append(p.tokens, token)
 				}
 				arg = arg[:0]
 			}
 
 			if !p.pipeComplete {
-				return nil, PipeHasNoTargetErr
+				return PipeHasNoTargetErr
 			}
 
 			i++
@@ -248,19 +245,19 @@ func (p *Parser) parse(input string) ([]token, error) {
 			i++
 		}
 	}
-	if endsWithRedirectOp(*p.tokens) {
-		return nil, fmt.Errorf("Broken redirect")
+	if endsWithRedirectOp(p.tokens) {
+		return fmt.Errorf("Broken redirect")
 	}
 
-	return *p.tokens, nil
+	return nil
 }
 
-func endsWithRedirectOp(tokens []token) bool {
+func endsWithRedirectOp(tokens []Token) bool {
 	n := len(tokens)
 	if n == 0 {
 		return false
 	}
-	if _, ok := tokens[n-1].(*redirectToken); ok {
+	if _, ok := tokens[n-1].(*RedirectToken); ok {
 		return true
 	}
 	return false

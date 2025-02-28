@@ -35,9 +35,9 @@ func main() {
 func cmdLifecycle(ctx context.Context) error {
 	var (
 		shell  *Shell
-		tokens []token
+		tokens []Token
 	)
-	tokenCh := make(chan []token)
+	tokenCh := make(chan []Token)
 	errorCh := make(chan error, 1)
 	fmt.Fprint(os.Stdout, regularPrompt)
 	_ = os.Stdout.Sync()

@@ -31,19 +31,20 @@ var builtins [5]string = [5]string{EXIT, ECHO, TYPE, PWD, CD}
 
 type Shell struct {
 	cmds    []*exec.Cmd
-	builtin []token
+	builtin []Token
 }
 
-func NewShell(sets [][]token, ctx context.Context) (*Shell, error) {
+func NewShell(sets [][]Token, ctx context.Context) (*Shell, error) {
 	shell := &Shell{
 		cmds:    nil,
 		builtin: nil,
 	}
 
+	// TODO: refactor to be in the loop down below
 	// check if builtin
 	if len(sets) == 1 {
 		set := sets[0]
-		if token, ok := set[0].(*literalToken); ok {
+		if token, ok := set[0].(*LiteralToken); ok {
 			if isBuiltin(token.literal) {
 				shell.builtin = set
 				return shell, nil
@@ -69,7 +70,7 @@ func NewShell(sets [][]token, ctx context.Context) (*Shell, error) {
 	return shell, nil
 }
 
-func redirectFd(redirectToken redirectOp, filePath string) (*os.File, error) {
+func redirectFd(redirectToken RedirectToken, filePath string) (*os.File, error) {
 	// TODO: do we validate the fd value?
 	switch redirectToken.op {
 	case ">":
@@ -126,9 +127,9 @@ func mkParentDirIfAbsent(path string) error {
 
 func (shell *Shell) runBuiltin() error {
 	token := (*shell).builtin[0]
-	t, ok := token.(*literalToken)
+	t, ok := token.(*LiteralToken)
 	if !ok {
-		return fmt.Errorf("expected builtin, got %s", token.string())
+		return fmt.Errorf("expected builtin, got %s", token.String())
 	}
 
 	switch t.literal {
@@ -152,13 +153,13 @@ func (shell *Shell) runBuiltin() error {
 	return nil
 }
 
-func (shell *Shell) validateCmds(cmds [][]token) error {
+func (shell *Shell) validateCmds(cmds [][]Token) error {
 	// 1. check path if exists
 	// 2. set redirections if applicable
 	// redirectionOps := []string{">", ">|", ">>"}
 
 	for _, cmd := range cmds {
-		tok, ok := cmd[0].(*literalToken)
+		tok, ok := cmd[0].(*LiteralToken)
 		if !ok {
 			return errors.New(fmt.Sprintf("expected binary name, got %s", stringify(cmd)))
 		}
@@ -176,10 +177,10 @@ func (shell *Shell) validateCmds(cmds [][]token) error {
 	return nil
 }
 
-func stringify(lst []token) string {
+func stringify(lst []Token) string {
 	var sb strings.Builder
 	for i, arg := range lst {
-		sb.WriteString(arg.string())
+		sb.WriteString(arg.String())
 
 		if i < len(lst)-1 {
 			sb.WriteString(" ")
@@ -209,13 +210,13 @@ func (shell *Shell) echo() {
 		token := cmd[i]
 
 		switch t := token.(type) {
-		case *literalToken:
+		case *LiteralToken:
 			argv = append(argv, t.literal)
 			i++
-		case *redirectOp:
-			pathTok, ok := cmd[i+1].(*literalToken)
+		case *RedirectToken:
+			pathTok, ok := cmd[i+1].(*LiteralToken)
 			if !ok {
-				fmt.Fprintf(os.Stderr, "Expected literalToken for path, got %s\n", cmd[i+1].string())
+				fmt.Fprintf(os.Stderr, "Expected literalToken for path, got %s\n", cmd[i+1].String())
 				return
 			}
 			openFile, err = redirectFd(*t, pathTok.literal)
@@ -255,9 +256,9 @@ func (shell *Shell) exit() error {
 		fmt.Fprintf(os.Stderr, "%s\n", notFound(stringify(cmd)))
 		return NewNotFoundError(stringify(cmd))
 	}
-	t, ok := cmd[1].(*literalToken)
+	t, ok := cmd[1].(*LiteralToken)
 	if !ok {
-		return fmt.Errorf("Expected int, got %s", cmd[1].string())
+		return fmt.Errorf("Expected int, got %s", cmd[1].String())
 	}
 	exitStatus, err := strconv.Atoi(t.literal)
 
@@ -273,9 +274,9 @@ func (shell *Shell) typeCommand() {
 	cmd := shell.builtin
 
 	for _, token := range cmd[1:] {
-		t, ok := token.(*literalToken)
+		t, ok := token.(*LiteralToken)
 		if !ok {
-			fmt.Fprintf(os.Stderr, "Expected literalToken as arg, got %s\n", token.string())
+			fmt.Fprintf(os.Stderr, "Expected literalToken as arg, got %s\n", token.String())
 		}
 
 		arg := t.literal
@@ -302,9 +303,9 @@ func (shell *Shell) cd() error {
 	var absPath string
 
 	cmd := shell.builtin
-	t, ok := cmd[1].(*literalToken)
+	t, ok := cmd[1].(*LiteralToken)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "Expected literalToken as arg, got %s\n", cmd[1].string())
+		fmt.Fprintf(os.Stderr, "Expected literalToken as arg, got %s\n", cmd[1].String())
 	}
 
 	path := t.literal
@@ -323,8 +324,6 @@ func (shell *Shell) cd() error {
 	if filepath.IsAbs(path) {
 		absPath = path
 	} else {
-		// FIXME: handle symlinks
-
 		cwd, err := os.Getwd()
 		if err != nil {
 			return errors.New("Failed to fetch current working directory")
@@ -333,7 +332,6 @@ func (shell *Shell) cd() error {
 	}
 
 	if err := os.Chdir(absPath); err != nil {
-		// fmt.Fprintf(os.Stderr, "cd: %s: No such file or directory\n", absPath)
 		return fmt.Errorf("cd: %s: No such file or directory", absPath)
 	}
 
@@ -343,7 +341,7 @@ func (shell *Shell) cd() error {
 	return nil
 }
 
-func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
+func initCmd(ctx context.Context, tokens []Token) (*exec.Cmd, error) {
 	argv := []string{}
 	var fd = STDOUT
 	var err error
@@ -353,13 +351,13 @@ func initCmd(ctx context.Context, tokens []token) (*exec.Cmd, error) {
 		token := tokens[i]
 
 		switch t := token.(type) {
-		case *literalToken:
+		case *LiteralToken:
 			argv = append(argv, t.literal)
 			i++
-		case *redirectOp:
-			pathTok, ok := tokens[i+1].(*literalToken)
+		case *RedirectToken:
+			pathTok, ok := tokens[i+1].(*LiteralToken)
 			if !ok {
-				return nil, fmt.Errorf("Expected literalToken for path, got %s\n", tokens[i+1].string())
+				return nil, fmt.Errorf("Expected literalToken for path, got %s\n", tokens[i+1].String())
 			}
 
 			openFile, err = redirectFd(*t, pathTok.literal)

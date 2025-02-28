@@ -324,7 +324,7 @@ func readInput(inputCh chan string, errorCh chan error, prompt string) {
 }
 
 func parseInput(
-	tokenCh chan []token,
+	tokenCh chan []Token,
 	errorCh chan error,
 ) {
 	parser := newParser()
@@ -379,13 +379,13 @@ Loop:
 	}
 }
 
-func splitAtPipe(tokens []token) [][]token {
-	cmds := make([][]token, 1)
+func splitAtPipe(tokens []Token) [][]Token {
+	cmds := make([][]Token, 1)
 	idx := 0
 
 	for _, tok := range tokens {
-		if t, ok := tok.(*literalToken); ok && t.literal == "|" {
-			cmds = append(cmds, []token{})
+		if t, ok := tok.(*LiteralToken); ok && t.literal == "|" {
+			cmds = append(cmds, []Token{})
 			idx++
 			continue
 		}
