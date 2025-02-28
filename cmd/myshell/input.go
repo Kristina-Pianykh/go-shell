@@ -264,7 +264,7 @@ func drawPrompt(prompt string) {
 }
 
 // TODO: don't allow cursor moves outside of input buffer boundary
-func readInput(inputCh chan string, prompt string) {
+func readInput(inputCh chan string, errorCh chan error, prompt string) {
 	var err error
 
 	// logFile, err := os.OpenFile("keylog.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -279,8 +279,10 @@ func readInput(inputCh chan string, prompt string) {
 	defer func() {
 		fmt.Fprint(os.Stdout, "\r\n")
 		_ = os.Stdout.Sync()
-		input = append(input, '\n')
-		inputCh <- string(input)
+		if len(input) > 0 {
+			input = append(input, '\n')
+			inputCh <- string(input)
+		}
 		close(inputCh)
 	}()
 
@@ -302,7 +304,7 @@ func readInput(inputCh chan string, prompt string) {
 		switch b {
 		case sigint:
 			fmt.Printf("^C")
-			input = []byte{}
+			errorCh <- SignalInterruptErr
 			return
 		case cariageReturn, newLine:
 			return
@@ -326,31 +328,42 @@ func parseInput(
 	errorCh chan error,
 ) {
 	parser := newParser()
-
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
 	if err != nil {
 		panic(err)
 	}
 
+	prompt := regularPrompt
+
 	defer func() {
-		close(tokenCh)
-		close(errorCh)
 		err := term.Restore(int(os.Stdin.Fd()), oldState)
 		if err != nil {
 			panic(err)
 		}
+		if len(parser.tokens) > 0 {
+			tokenCh <- parser.tokens
+		}
+		// TODO: how to synchronize terminal mode
+		// restoration with the main goroutine?
+		close(tokenCh)
+		close(errorCh)
 	}()
-	prompt := regularPrompt
 
 Loop:
 	inputCh := make(chan string)
-	go readInput(inputCh, prompt)
+	readInputErrorCh := make(chan error)
+	go readInput(inputCh, readInputErrorCh, prompt)
+
 	select {
+	case err := <-readInputErrorCh:
+		errorCh <- err
+		return
 	case input, ok := <-inputCh:
 		if !ok || len(input) == 0 {
 			return
 		}
-		tokens, err := parser.parse(input)
+
+		err := parser.parse(input)
 		if err != nil {
 			if errors.Is(err, UnclosedQuoteErr) || errors.Is(err, PipeHasNoTargetErr) {
 				prompt = awaitPrompt
@@ -362,11 +375,6 @@ Loop:
 			}
 		}
 
-		if len(tokens) == 0 {
-			return
-		}
-
-		tokenCh <- tokens
 		return
 	}
 }

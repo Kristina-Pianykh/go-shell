@@ -36,7 +36,6 @@ func cmdLifecycle(ctx context.Context) error {
 	var (
 		shell  *Shell
 		tokens []token
-		ok     bool
 	)
 	tokenCh := make(chan []token)
 	errorCh := make(chan error, 1)
@@ -44,22 +43,22 @@ func cmdLifecycle(ctx context.Context) error {
 	_ = os.Stdout.Sync()
 	go parseInput(tokenCh, errorCh)
 
+	var ok bool
 	select {
 	case err := <-errorCh:
 		return err
 	case tokens, ok = <-tokenCh:
 		if !ok {
-			fmt.Println()
-			return SignalInterruptErr
+			return nil
 		}
 	}
 
 	cmds := splitAtPipe(tokens)
 	shell, err := NewShell(cmds, ctx)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
 		return err
 	}
+
 	switch {
 	case shell.builtin != nil:
 		return shell.runBuiltin()
