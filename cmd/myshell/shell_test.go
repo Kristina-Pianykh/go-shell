@@ -66,26 +66,32 @@ func testTokens(t *testing.T, testId int, tokens []Token, expectedTs []Token) {
 				testId, expT.String(), expT, tok.String(), tok)
 		}
 
-		switch v := tok.(type) {
+		switch expTok := expT.(type) {
 		case *LiteralToken:
-			expectedLiteralT := expT.(*LiteralToken)
+			literalTok, ok := tok.(*LiteralToken)
+			if !ok {
+				t.Fatalf("Expected *LiteralToken, got=%T\n", literalTok)
+			}
 
-			if v.literal != expectedLiteralT.literal {
-				t.Fatalf("%d: Expected tok.literal=%q, got %q\n", testId, v, expectedLiteralT)
+			if literalTok.literal != expTok.literal {
+				t.Fatalf("%d: Expected tok.literal=%q, got %q\n", testId, expTok, literalTok)
 			}
 
 		case *RedirectToken:
-			expRedirectT := expT.(*RedirectToken)
-
-			if v.op != expRedirectT.op {
-				t.Fatalf("%d: Expected tok.op=%q, got %q\n", testId, v.op, expRedirectT.op)
+			redirectTok, ok := tok.(*RedirectToken)
+			if !ok {
+				t.Fatalf("Expected *RedirectToken, got=%T\n", redirectTok)
 			}
 
-			if v.fd != expRedirectT.fd {
-				t.Fatalf("%d: Expected tok.fd=%d, got %d\n", testId, v.fd, expRedirectT.fd)
+			if expTok.op != redirectTok.op {
+				t.Fatalf("%d: Expected tok.op=%q, got %q\n", testId, expTok.op, redirectTok.op)
+			}
+
+			if expTok.fd != redirectTok.fd {
+				t.Fatalf("%d: Expected tok.fd=%d, got %d\n", testId, expTok.fd, redirectTok.fd)
 			}
 		default:
-			t.Fatalf("unexpected type: %q\n", v)
+			t.Fatalf("unexpected type: %q\n", expTok)
 		}
 	}
 }
