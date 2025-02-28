@@ -138,7 +138,7 @@ func autoCmplBuiltin(s []byte) []string {
 }
 
 func sharePrefix(lst []fs.DirEntry, prefix string) []string {
-	entries := []string{}
+	var entries []string
 
 	for _, e := range lst {
 		if !strings.HasPrefix(e.Name(), string(prefix)) {
@@ -176,12 +176,13 @@ func commonPrefix(lst []string) string {
 
 func autoCmplBin(s []byte) []string {
 	clean := strings.TrimLeft(string(s), " \t")
-	results := []string{}
 
 	files, err := searchPathForBins(clean)
 	if err != nil {
-		return results
+		return ([]string)(nil)
 	}
+
+	var results []string
 	for _, file := range files {
 		res := cmplInput(s, file)
 		results = append(results, string(res))
@@ -197,7 +198,6 @@ func stripLeft(s []byte) []byte {
 func searchPathForBins(prefix string) ([]string, error) {
 	// TODO: if file is a path
 	// TODO: fix with the idea that `file` is incomplete
-	bins := []string{}
 
 	// if strings.Contains(prefix, "/") {
 	// 	err := isExec(prefix)
@@ -210,6 +210,7 @@ func searchPathForBins(prefix string) ([]string, error) {
 	// if file is a binary name
 	path := os.Getenv("PATH")
 
+	var bins []string
 	for _, dir := range filepath.SplitList(path) {
 		if dir == "" {
 			// Unix shell semantics: path element "" means "."
@@ -274,12 +275,13 @@ func readInput(inputCh chan string, errorCh chan error, prompt string) {
 	// defer logFile.Close()
 
 	buf := make([]byte, 1)
-	input := []byte{}
+	var input []byte
 
 	defer func() {
 		fmt.Fprint(os.Stdout, "\r\n")
 		_ = os.Stdout.Sync()
-		if len(input) > 0 {
+		if input != nil {
+			// if len(input) > 0 {
 			input = append(input, '\n')
 			inputCh <- string(input)
 		}

@@ -100,7 +100,6 @@ func redirectFd(redirectToken RedirectToken, filePath string) (*os.File, error) 
 		file, err := os.OpenFile(filePath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0644)
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
-				fmt.Fprintf(os.Stdout, "%s\n", err.Error())
 				return nil, err
 			} else {
 				panic(err) // FIXME: any relevant errors?
@@ -342,10 +341,10 @@ func (shell *Shell) cd() error {
 }
 
 func initCmd(ctx context.Context, tokens []Token) (*exec.Cmd, error) {
-	argv := []string{}
 	var fd = STDOUT
 	var err error
 	var openFile *os.File
+	var argv []string
 
 	for i := 0; i < len(tokens); {
 		token := tokens[i]

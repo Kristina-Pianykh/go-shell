@@ -58,7 +58,7 @@ func newRedirectToken(op string, fd int) Token {
 
 func newParser() *Parser {
 	return &Parser{
-		tokens:       []Token{},
+		tokens:       nil,
 		singleQuoted: false,
 		doubleQuoted: false,
 		pipeComplete: true,
