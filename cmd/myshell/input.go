@@ -264,24 +264,50 @@ func drawPrompt(prompt string) {
 	fmt.Fprint(os.Stdout, prompt)
 }
 
-// TODO: don't allow cursor moves outside of input buffer boundary
-func readInput(inputCh chan string, errorCh chan error, prompt string) {
-	var err error
+func readKeyStroke(logFile *os.File) (byte, error) {
+	buf := make([]byte, 3)
 
+	n, err := os.Stdin.Read(buf)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return 0, err
+		} else {
+			// FIXME: recover
+			panic(err)
+		}
+	}
+	if logFile != nil {
+		fmt.Fprintf(logFile, "Received %q\n", buf)
+		_ = logFile.Sync()
+	}
+
+	if n == 3 {
+		switch buf[2] {
+		case 'A', 'B':
+			// ignore vertical navigation
+			return 0, fmt.Errorf("Out of line bounds")
+		case 'C', 'D':
+			// TODO: handle input out of bounds issues
+			return 0, fmt.Errorf("Out of line bounds")
+		}
+	}
+
+	return buf[0], nil
+}
+
+func readInput(inputCh chan string, errorCh chan error, prompt string) {
 	// logFile, err := os.OpenFile("keylog.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	// if err != nil {
 	// 	panic(err)
 	// }
 	// defer logFile.Close()
 
-	buf := make([]byte, 1)
 	var input []byte
 
 	defer func() {
 		fmt.Fprint(os.Stdout, "\r\n")
 		_ = os.Stdout.Sync()
 		if input != nil {
-			// if len(input) > 0 {
 			input = append(input, '\n')
 			inputCh <- string(input)
 		}
@@ -290,18 +316,11 @@ func readInput(inputCh chan string, errorCh chan error, prompt string) {
 
 	bellCnt := 0
 	for {
-		_, err = os.Stdin.Read(buf)
+		// b, err := readKeyStroke(logFile)
+		b, err := readKeyStroke(nil)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return
-			} else {
-				// FIXME: recover
-				panic(err)
-			}
+			continue
 		}
-		b := buf[0]
-		// fmt.Fprintf(logFile, "Received byte: %d (char: %q)\n", b, b)
-		//  = logFile.Sync()
 
 		switch b {
 		case sigint:
