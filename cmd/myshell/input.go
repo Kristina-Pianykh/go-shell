@@ -15,12 +15,18 @@ import (
 )
 
 const (
-	del           = 127
-	cariageReturn = 13
-	newLine       = 10
-	sigint        = 3
-	tab           = 9
-	bell          = 7
+	DELETE   = 127
+	CR       = 13
+	NL       = 10
+	SIGINT   = 3
+	TAB      = 9
+	BELL     = 7
+	LBRACKET = 91
+	ESC      = 27
+	A        = 65
+	B        = 66
+	C        = 67
+	D        = 68
 )
 const MAX_INT = int((uint(1) << 63) - 1)
 
@@ -264,43 +270,113 @@ func drawPrompt(prompt string) {
 	fmt.Fprint(os.Stdout, prompt)
 }
 
-func readKeyStroke(logFile *os.File) (byte, error) {
+func isMoveUpAnsiCode(buf []byte) bool {
+	if len(buf) != 3 {
+		return false
+	}
+	if buf[0] != ESC {
+		return false
+	}
+	if buf[1] != LBRACKET {
+		return false
+	}
+	if buf[2] != A {
+		return false
+	}
+	return true
+}
+
+func isMoveDownAnsiCode(buf []byte) bool {
+	if len(buf) != 3 {
+		return false
+	}
+	if buf[0] != ESC {
+		return false
+	}
+	if buf[1] != LBRACKET {
+		return false
+	}
+	if buf[2] != B {
+		return false
+	}
+	return true
+}
+
+func isMoveLeftAnsiCode(buf []byte) bool {
+	if len(buf) != 3 {
+		return false
+	}
+	if buf[0] != ESC {
+		return false
+	}
+	if buf[1] != LBRACKET {
+		return false
+	}
+	if buf[2] != D {
+		return false
+	}
+	return true
+}
+
+func isMoveRightAnsiCode(buf []byte) bool {
+	if len(buf) != 3 {
+		return false
+	}
+	if buf[0] != ESC {
+		return false
+	}
+	if buf[1] != LBRACKET {
+		return false
+	}
+	if buf[2] != C {
+		return false
+	}
+	return true
+}
+
+func readKeyStroke(logFile *os.File) ([]byte, error) {
 	buf := make([]byte, 3)
 
 	n, err := os.Stdin.Read(buf)
 	if err != nil {
 		if errors.Is(err, io.EOF) {
-			return 0, err
+			return nil, err
 		} else {
 			// FIXME: recover
 			panic(err)
 		}
 	}
 	if logFile != nil {
-		fmt.Fprintf(logFile, "Received %q\n", buf)
+		fmt.Fprintf(logFile, "Received %x\n", buf)
 		_ = logFile.Sync()
 	}
 
 	if n == 3 {
-		switch buf[2] {
-		case 'A', 'B':
+		switch {
+		case isMoveUpAnsiCode(buf), isMoveDownAnsiCode(buf):
 			// ignore vertical navigation
-			return 0, fmt.Errorf("Out of line bounds")
-		case 'C', 'D':
+			return nil, fmt.Errorf("Out of line bounds")
+		case isMoveRightAnsiCode(buf), isMoveLeftAnsiCode(buf):
 			// TODO: handle input out of bounds issues
-			return 0, fmt.Errorf("Out of line bounds")
+			// return buf, nil
+			return nil, fmt.Errorf("Out of line bounds")
 		}
 	}
 
-	return buf[0], nil
+	return buf[:n], nil
 }
 
-func readInput(inputCh chan string, errorCh chan error, prompt string) {
-	// logFile, err := os.OpenFile("keylog.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// defer logFile.Close()
+func readInput(
+	inputCh chan string,
+	errorCh chan error,
+	prompt string,
+	historyF *os.File,
+) {
+	logFile, err := os.OpenFile("keylog.txt", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		panic(err)
+	}
+	defer logFile.Close()
 
 	var input []byte
 
@@ -316,30 +392,37 @@ func readInput(inputCh chan string, errorCh chan error, prompt string) {
 
 	bellCnt := 0
 	for {
-		// b, err := readKeyStroke(logFile)
-		b, err := readKeyStroke(nil)
+		keystroke, err := readKeyStroke(logFile)
+		// keystroke, err := readKeyStroke(nil)
 		if err != nil {
 			continue
 		}
 
-		switch b {
-		case sigint:
-			fmt.Printf("^C")
-			errorCh <- SignalInterruptErr
-			return
-		case cariageReturn, newLine:
-			return
-		case tab:
-			input, bellCnt = handleTab(input, bellCnt)
-			if input == nil || bellCnt < 0 {
-				panic("Reached unreachable state")
+		if len(keystroke) == 3 {
+			// ANSI CODE
+			fmt.Fprint(os.Stdout, string(keystroke))
+
+		} else if len(keystroke) == 1 {
+			b := keystroke[0]
+			switch b {
+			case SIGINT:
+				fmt.Printf("^C")
+				errorCh <- SignalInterruptErr
+				return
+			case CR, NL:
+				return
+			case TAB:
+				input, bellCnt = handleTab(input, bellCnt)
+				if input == nil || bellCnt < 0 {
+					panic("Reached unreachable state")
+				}
+			case DELETE:
+				input = handleDelete(input)
+				continue
+			default:
+				bellCnt = 0
+				input = handleRegularKeyPress(input, b, prompt)
 			}
-		case del:
-			input = handleDelete(input)
-			continue
-		default:
-			bellCnt = 0
-			input = handleRegularKeyPress(input, b, prompt)
 		}
 	}
 }
@@ -347,6 +430,7 @@ func readInput(inputCh chan string, errorCh chan error, prompt string) {
 func parseInput(
 	tokenCh chan []Token,
 	errorCh chan error,
+	historyF *os.File,
 ) {
 	parser := newParser()
 	oldState, err := term.MakeRaw(int(os.Stdin.Fd()))
@@ -373,7 +457,7 @@ func parseInput(
 Loop:
 	inputCh := make(chan string)
 	readInputErrorCh := make(chan error)
-	go readInput(inputCh, readInputErrorCh, prompt)
+	go readInput(inputCh, readInputErrorCh, prompt, historyF)
 
 	select {
 	case err := <-readInputErrorCh:

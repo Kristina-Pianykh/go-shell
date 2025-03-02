@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 )
 
 const regularPrompt = "$ "
@@ -21,8 +22,13 @@ func main() {
 		cancelCtx()
 	}()
 
+	history, err := loadHistory()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%s\n", err.Error())
+	}
+
 	for {
-		err := cmdLifecycle(ctx)
+		err := cmdLifecycle(ctx, history)
 		if errors.Is(err, ExitErr) {
 			return
 		}
@@ -32,7 +38,27 @@ func main() {
 	}
 }
 
-func cmdLifecycle(ctx context.Context) error {
+func loadHistory() (*os.File, error) {
+	file := ".history"
+
+	var err error
+	var cwd string
+	cwd, err = os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load current working directory") // for debugging
+	}
+
+	filePath := filepath.Join(cwd, file)
+
+	var f *os.File
+	f, err = os.OpenFile(filePath, os.O_RDWR|os.O_APPEND|os.O_CREATE, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open history file %s\n", filePath)
+	}
+	return f, nil
+}
+
+func cmdLifecycle(ctx context.Context, history *os.File) error {
 	var shell *Shell
 	var tokens []Token
 
